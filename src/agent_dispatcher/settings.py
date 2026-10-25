@@ -3,8 +3,15 @@
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+def _split_repos(value: object) -> object:
+    """Accept `owner/a,owner/b` from the environment."""
+    if isinstance(value, str):
+        return [repo.strip() for repo in value.split(",") if repo.strip()]
+    return value
 
 
 class Settings(BaseSettings):
@@ -13,7 +20,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DISPATCHER_", env_file=".env")
 
     owner: str = "Abdel-Abdelaal"
-    repos: Annotated[list[str], NoDecode] = Field(
+    repos: Annotated[list[str], NoDecode, BeforeValidator(_split_repos)] = Field(
         default_factory=lambda: ["Abdel-Abdelaal/shortlink"]
     )
     db_path: Path = Path("dispatcher.sqlite3")
@@ -23,11 +30,3 @@ class Settings(BaseSettings):
     github_token: SecretStr | None = None
     mimo_api_key: SecretStr | None = None
     nvidia_api_key: SecretStr | None = None
-
-    @field_validator("repos", mode="before")
-    @classmethod
-    def _split_repos(cls, value: object) -> object:
-        """Accept `owner/a,owner/b` from the environment."""
-        if isinstance(value, str):
-            return [repo.strip() for repo in value.split(",") if repo.strip()]
-        return value

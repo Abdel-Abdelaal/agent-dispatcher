@@ -10,7 +10,7 @@ the controller (not the agent) decides what becomes a PR.
   apps that drive a subscription login, or saturate it around the clock, are not.
   Runs are therefore serial and paced, and stop at a share of the weekly quota.
 - **Codex stays on the controller host.** Automating a ChatGPT-plan login from
-  public-repo GitHub Actions isn't allowed, so `CodexCli` refuses when it sees
+  public-repository GitHub Actions isn't allowed, so `CodexCli` refuses when it sees
   `GITHUB_ACTIONS=true`.
 - **No credential in the agent's run.** Each CLI gets an allowlisted environment:
   its own login and the basics, never a GitHub token or an API key. Publishing is a
@@ -27,7 +27,7 @@ the controller (not the agent) decides what becomes a PR.
 - **Run.** The prompt goes on stdin, with the issue inside a delimited untrusted
   block after removing HTML comments, `<details>` blocks and invisible characters.
 - **Gate.** The controller reads the diff itself and refuses protected paths,
-  binary files, test deletions, paths outside the repo and oversized diffs.
+  binary files, test deletions, paths outside the repository and oversized diffs.
 - **Publish.** A draft PR from the App, then the fleet's required checks, then
   Abdel merges.
 
@@ -46,7 +46,7 @@ the controller (not the agent) decides what becomes a PR.
 `.github/`, `.claude/`, `.codex/`, `.mcp.json`, `CODEOWNERS`, `AGENTS.md`,
 `CLAUDE.md`, `opencode.json`, `.pre-commit-config.yaml`, `.env*`, lockfiles and
 the Gradle wrapper, at any depth and in any letter case. `.claude/` and `.mcp.json`
-matter most: a headless run loads a repo's hooks and MCP servers, so one merged
+matter most: a headless run loads a repository's hooks and MCP servers, so one merged
 edit there would run code on every later run.
 
 ## Phases

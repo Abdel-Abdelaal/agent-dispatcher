@@ -90,3 +90,6 @@ packages = ["src/agent_dispatcher"]
 [tool.uv]
 # Same 14-day cooldown Dependabot uses: never resolve a release younger than that.
 exclude-newer = "14 days"
+# Security fixes skip the cooldown, as Dependabot security updates do.
+# Remove each entry once the fixed release is older than 14 days.
+exclude-newer-package = { certifi = false }
