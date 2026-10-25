@@ -1,0 +1,6 @@
+# Reproducible workflow execution, including workflows controlled by this account.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        '*': hash-pin

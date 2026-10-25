@@ -1,0 +1,14 @@
+name: PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+# Deny everything by default; each job asks for only what it needs.
+permissions: {}
+
+jobs:
+  pr-title:
+    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/pr-title.yml@0b7cd6a33abb89db1743c91d3f11cf98179ebcd2 # v1.9.0
+    permissions:
+      pull-requests: read

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "mimo/mimo-v2.6-flash",
+  "small_model": "mimo/mimo-v2.6-flash",
+  "autoupdate": false,
+  "share": "disabled",
+  "enabled_providers": [
+    "mimo"
+  ],
+  "provider": {
+    "mimo": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "MiMo 2.6 Flash",
+      "options": {
+        "baseURL": "{env:AI_BASE_URL}",
+        "apiKey": "{env:AI_API_KEY}"
+      },
+      "models": {
+        "mimo-v2.6-flash": {
+          "name": "MiMo 2.6 Flash",
+          "limit": {
+            "context": 1048576,
+            "output": 32768
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "deny"
+  }
+}
