@@ -81,12 +81,10 @@ def providers(settings: Settings) -> dict[str, Provider]:
     adapters: dict[str, Provider] = {
         "claude": ClaudeCli(
             oauth_token=settings.claude_oauth_token,
-            think=Tuning(settings.claude_think_model, settings.claude_think_effort),
             work=Tuning(settings.claude_work_model, settings.claude_work_effort),
         ),
         "codex": CodexCli(
-            think=Tuning(settings.codex_think_model, settings.codex_think_effort),
-            work=Tuning(settings.codex_work_model, settings.codex_work_effort),
+            work=Tuning(settings.codex_work_model, settings.codex_work_effort)
         ),
     }
     if settings.mimo_api_key:
@@ -139,6 +137,7 @@ def run_live(
             writer=GitHubWriter(subprocess_runner, os.environ, root),
             limits=Limits(settings.max_files, settings.max_lines),
             triage=triage(settings, client),
+            ladder=settings.thinking_ladder,
         ).execute()
     finally:
         queue.finish_run(run_id, outcome.state.name.lower(), datetime.now(UTC))

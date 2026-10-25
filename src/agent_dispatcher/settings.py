@@ -1,10 +1,13 @@
 """Configuration, read once from `DISPATCHER_` environment variables."""
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from agent_dispatcher.levels import DEFAULT_LADDER
 
 
 def _split_repos(value: object) -> object:
@@ -35,15 +38,15 @@ class Settings(BaseSettings):
     park_hours: float = Field(default=5, gt=0)
     github_token: SecretStr | None = None
     claude_oauth_token: SecretStr | None = None
-    # Thinking (plan, review) gets the strong model at high effort; quality pays
-    # most there and the steps are short. Implementing, which only happens when
-    # both workers are out, gets a lighter model to save the scarce allowance.
-    claude_think_model: str = "claude-opus-5-5"
-    claude_think_effort: ClaudeEffort = "high"
+    # Thinking (plan, review) follows the task's level: see levels.DEFAULT_LADDER.
+    # Override with JSON, e.g. {"claude": {"hard": ["claude-opus-5-5", "max"]}}.
+    thinking_ladder: dict[str, dict[str, tuple[str, str]]] = Field(
+        default_factory=lambda: deepcopy(DEFAULT_LADDER)
+    )
+    # Implementing, which a thinker only does when both workers are out, gets a
+    # lighter fixed setting to save the scarce allowance.
     claude_work_model: str = "claude-sonnet-5-5"
     claude_work_effort: ClaudeEffort = "medium"
-    codex_think_model: str = "gpt-6.1-sol"
-    codex_think_effort: CodexEffort = "high"
     codex_work_model: str = "gpt-6.1-sol"
     codex_work_effort: CodexEffort = "medium"
     mimo_api_key: SecretStr | None = None

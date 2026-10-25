@@ -20,21 +20,38 @@ Claude and Codex are the strongest models with the smallest allowances, so they
 only think: short, read-only plan and review steps. MiMo and NVIDIA have the
 largest allowances, so they do the token-heavy implementation.
 
-| Step | Role | Provider, in order of preference | Model and effort (default) |
-| --- | --- | --- | --- |
-| Triage | cheap screen | MiMo, else NVIDIA (chat API, JSON verdict) | `mimo-v2.6-flash`, thinking off |
-| Plan | thinker, read-only | Claude, else Codex | `claude-opus-5-5` high / `gpt-6.1-sol` high |
-| Implement | worker | MiMo (Claude Code harness), else NVIDIA (OpenCode) | `mimo-v2.6-flash` / `z-ai/glm-5.3-flash` |
-| Implement, last resort | thinker | Claude, else Codex, when both workers are out | `claude-sonnet-5-5` medium / `gpt-6.1-sol` medium |
-| Gate | controller | protected paths, diff size, test deletions, symlinks | none |
-| Review | the other thinker, read-only | Codex if Claude planned, and the reverse | same as Plan |
-| Repair | worker | one round on the reviewer's findings, then gate and review again | as Implement |
+| Step | Role | Provider, in order of preference |
+| --- | --- | --- |
+| Triage | cheap screen; also rates the task easy, medium or hard | MiMo, else NVIDIA (chat API, JSON verdict) |
+| Plan | thinker, read-only; re-rates the task on its first line | Claude, else Codex |
+| Implement | worker | MiMo (Claude Code harness), else NVIDIA (OpenCode), else a thinker (Sonnet 5.5 / gpt-6.1-sol, medium) |
+| Gate | controller | protected paths, diff size, test deletions, symlinks |
+| Review | the other thinker, read-only | Codex if Claude planned, and the reverse |
+| Repair | worker | one round on the reviewer's findings, then gate and review again |
 
-Quality is spent where it pays: a precise plan lets the cheaper worker get it right
-first time, and the review is the last check before a human. Both are short, so
-high effort costs little; `xhigh` and `max` would drain the scarce weekly allowance.
-Every model and effort is a `DISPATCHER_*` setting (see `.env.example`), and the
-dispatcher passes them explicitly, so changing the Codex app's `config.toml` doesn't
+### Thinking follows the task's difficulty
+
+Conserving the thinkers' small allowances comes first, so the frontier models only
+run on tasks that prove hard, and nothing goes above high effort.
+
+| Level | Claude | Codex |
+| --- | --- | --- |
+| easy | `claude-sonnet-5-5`, low | `gpt-6.1-sol`, low |
+| medium (also the default without triage) | `claude-sonnet-5-5`, medium | `gpt-6.1-sol`, medium |
+| hard | `claude-opus-5-5`, high | `gpt-6-astra`, high |
+
+The level can move during a run:
+
+1. Triage sets the first level.
+2. The planner rates the task on its first line. If it rates it harder than the
+   level it planned at, it plans again at the new level. If it rates it easier, the
+   review drops to the cheaper setting.
+3. Each rejected review raises the level one step for the repair and the next
+   review.
+
+The level used is noted in the PR and in an `Agent-Level` commit trailer. The ladder
+is the `DISPATCHER_THINKING_LADDER` setting (JSON), and the dispatcher passes every
+model and effort explicitly, so changing the Codex app's `config.toml` doesn't
 change the dispatcher.
 
 A provider that reports its limit is parked until the time it gives (Codex prints

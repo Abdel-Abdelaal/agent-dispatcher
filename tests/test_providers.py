@@ -275,30 +275,35 @@ def test_nvidia_rate_limit_parks_the_worker(tmp_path: Path) -> None:
     )
 
 
-def test_thinking_and_working_use_their_own_model_and_effort(tmp_path: Path) -> None:
-    claude = ClaudeCli(
-        think=Tuning("claude-opus-5-5", "high"),
-        work=Tuning("claude-sonnet-5-5", "medium"),
-    )
-    think = claude.argv(read_only=True)
-    work = claude.argv(read_only=False)
+def test_each_step_gets_its_own_model_and_effort(tmp_path: Path) -> None:
+    claude = ClaudeCli(work=Tuning("claude-sonnet-5-5", "medium"))
+    think = claude.argv(read_only=True, tuning=Tuning("claude-opus-5-5", "high"))
     assert think[think.index("--model") + 1 :][:3] == [
         "claude-opus-5-5",
         "--effort",
         "high",
     ]
+    work = claude.argv(read_only=False)
     assert work[work.index("--model") + 1 :][:3] == [
         "claude-sonnet-5-5",
         "--effort",
         "medium",
     ]
-    assert "--model" not in ClaudeCli().argv(read_only=True)
-    codex = CodexCli(
-        think=Tuning("gpt-6.1-sol", "high"), work=Tuning("gpt-6.1-sol", "medium")
+    assert "--model" not in claude.argv(read_only=True)
+    runner = FakeRunner()
+    claude.run(
+        "x",
+        tmp_path,
+        read_only=True,
+        tuning=Tuning("m", "low"),
+        runner=runner,
+        environ=HOST_ENV,
     )
-    argv = codex.argv(tmp_path, read_only=True)
-    assert argv[argv.index("--model") + 1] == "gpt-6.1-sol"
+    assert runner.calls[0][0][-4:] == ["--model", "m", "--effort", "low"]
+    codex = CodexCli(work=Tuning("gpt-6.1-sol", "medium"))
+    argv = codex.argv(tmp_path, read_only=True, tuning=Tuning("gpt-6-astra", "high"))
+    assert argv[argv.index("--model") + 1] == "gpt-6-astra"
     assert argv[argv.index("--config") + 1] == "model_reasoning_effort=high"
     assert argv[-1] == "-"
     assert "model_reasoning_effort=medium" in codex.argv(tmp_path, read_only=False)
-    assert "--model" not in CodexCli().argv(tmp_path, read_only=True)
+    assert "--model" not in codex.argv(tmp_path, read_only=True)
