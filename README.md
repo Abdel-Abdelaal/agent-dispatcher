@@ -19,7 +19,7 @@ the VPS until the move; `once --dry-run` only plans.
 | Label state machine and SQLite run queue with a single-run lock | built, tested |
 | Owner-only intake and issue-text sanitiser | built, tested |
 | Live run: two clones, gate on the clean one, draft PR through `gh` | built, tested against local Git repositories |
-| Claude Code adapter (subscription token, no user or repository settings, no Bash) | built; first live run pending |
+| Claude Code adapter (CLI login or token, no user or repository settings, no Bash) | built; first live run pending |
 | Codex adapter (fallback when Claude is parked) | built, tested with fakes |
 | MiMo and NVIDIA (triage, cross-vendor review) | adapters built; wired in phase 3 |
 | Quota guard: park a provider when a run reports exhaustion | built, tested |

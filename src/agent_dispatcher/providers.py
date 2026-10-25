@@ -79,8 +79,15 @@ def subprocess_runner(
 def scrubbed_env(
     source: Mapping[str, str], extra: tuple[str, ...] = ()
 ) -> dict[str, str]:
-    """Copy only allowlisted variables; everything else, tokens included, is dropped."""
-    return {name: source[name] for name in (*_BASE_ENV, *extra) if name in source}
+    """Copy only allowlisted variables; everything else, tokens included, is dropped.
+
+    The CLIs keep their logins under the user profile. On Windows `HOME` may point
+    somewhere else, so it follows `USERPROFILE` when that is set.
+    """
+    env = {name: source[name] for name in (*_BASE_ENV, *extra) if name in source}
+    if "USERPROFILE" in env:
+        env["HOME"] = env["USERPROFILE"]
+    return env
 
 
 def _claude_error(stdout: str) -> str:

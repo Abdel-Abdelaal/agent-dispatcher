@@ -43,6 +43,11 @@ def test_scrubbed_env_keeps_only_the_allowlist() -> None:
     assert scrubbed_env(HOST_ENV) == {"PATH": "/usr/bin", "HOME": "/home/agent"}
 
 
+def test_home_follows_the_windows_user_profile() -> None:
+    env = scrubbed_env({"HOME": "C:/Other", "USERPROFILE": "C:/Users/a"})
+    assert env["HOME"] == "C:/Users/a"
+
+
 def test_claude_gets_its_token_but_no_other_secret(tmp_path: Path) -> None:
     runner = FakeRunner()
     claude = ClaudeCli(oauth_token=SecretStr("oauth-token"))
