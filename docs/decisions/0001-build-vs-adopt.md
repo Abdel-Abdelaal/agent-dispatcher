@@ -20,12 +20,10 @@ code independent. A tool can only replace a piece of `agent-dispatcher` (intake,
 routing, sandbox, gate or review) if it keeps the rules in `AGENTS.md`:
 
 1. Only labels the owner sets start a task.
-2. Claude and ChatGPT subscription logins are used only through the official
-   `claude -p` and `codex exec` clients.
+2. Subscription logins go only through `claude -p` and `codex exec`.
 3. Agent runs never receive a GitHub token. Only the controller publishes.
 4. The controller, not the agent, decides whether a diff may become a PR.
-5. It fits a VPS with about 2 GiB of free RAM, runs headless and sends no
-   telemetry we haven't turned on.
+5. It runs headless on a VPS with about 2 GiB of free RAM, with telemetry off.
 
 Evidence was gathered on 2026-10-25 from each project's source, docs, GitHub
 releases and package registry. Cyrus was read at commit
@@ -37,7 +35,7 @@ Nothing was installed on the VPS or run against a repository.
 | Tool | Licence | Latest release | Headless | Subscription login | Could help with | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
 | Cyrus | Apache-2.0 | v0.2.73, 2026-09-30 | yes, daemon | Claude via Agent SDK and `setup-token` | intake, sandbox | reject |
-| OpenCode | MIT | v1.19.4, 2026-10-22 | yes, `run` and `serve` | ChatGPT Plus built in; Claude plugins unbundled | MiMo and NVIDIA runs, review | adopt `run`; reject `serve` |
+| OpenCode | MIT | v1.19.4, 2026-10-22 | yes, `run` and `serve` | ChatGPT Plus built-in; Claude plugins unbundled | MiMo and NVIDIA runs, review | adopt `run`; reject `serve` |
 | aider | Apache-2.0 | 0.86.2 on PyPI, 2026-02-12 | yes, `--message` | no, API keys | MiMo and NVIDIA runs | reject |
 | Goose | Apache-2.0 | v1.56.0, 2026-10-23 | yes, `goose run` | yes, through third-party ACP adapters | MiMo and NVIDIA runs | reject |
 | LiteLLM | MIT core, commercial `enterprise/` | v1.106.4, 2026-10-25 | yes, proxy | no | routing | reject |
@@ -53,7 +51,7 @@ All ten repositories had commits in October 2026 except aider (last push
 ### Cyrus
 
 Cyrus is the closest match in shape: a daemon that turns tracker events into
-agent sessions in per-issue git worktrees. It fails three of the five rules by
+agent sessions in per-issue Git worktrees. It fails three of the five rules by
 design, not by configuration.
 
 - **Owner-only label triggers: no.** The GitHub transport accepts only
@@ -106,7 +104,7 @@ default. `opencode run` runs one prompt headless, and `opencode serve` exposes
 an HTTP API with optional basic auth
 ([server docs](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/server.mdx)).
 Its docs say Anthropic prohibits using Claude Pro/Max through OpenCode
-plugins, which stopped being bundled in 1.3.0; ChatGPT Plus login is built in
+plugins, which stopped being bundled in 1.3.0; ChatGPT Plus login is built-in
 ([provider docs](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/providers.mdx)).
 We use it only with API-key providers (MiMo and NVIDIA) and never connect a
 Claude or ChatGPT login to it; Codex runs stay on `codex exec`. Server mode is
@@ -228,5 +226,5 @@ together.
 - Bad: OpenCode updates fast (v1.19.4 on 2026-10-22), so its version needs the
   same pinning and 14-day cooldown as other dependencies, with `autoupdate` and
   `share` left off.
-- Neutral: Cyrus, Symphony, gh-aw and Codeman stay credited in the README as
+- Neutral: Cyrus, Symphony, gh-aw and Codeman stay credited in `README.md` as
   design sources; none of their code is used.
