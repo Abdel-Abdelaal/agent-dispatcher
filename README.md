@@ -11,15 +11,15 @@ fleet's normal required checks, and Abdel merges by hand.
 
 ## Status
 
-Phase 1. `once` runs one real task end to end on this laptop, which stands in for
+Phase 1. `once` runs one real task end-to-end on this laptop, which stands in for
 the VPS until the move; `once --dry-run` only plans.
 
 | Piece | State |
 | --- | --- |
 | Label state machine and SQLite run queue with a single-run lock | built, tested |
 | Owner-only intake and issue-text sanitiser | built, tested |
-| Live run: two clones, gate on the clean one, draft PR through `gh` | built, tested against local git repos |
-| Claude Code adapter (subscription token, no user or repo settings, no Bash) | built; first live run pending |
+| Live run: two clones, gate on the clean one, draft PR through `gh` | built, tested against local Git repositories |
+| Claude Code adapter (subscription token, no user or repository settings, no Bash) | built; first live run pending |
 | Codex adapter (fallback when Claude is parked) | built, tested with fakes |
 | MiMo and NVIDIA (triage, cross-vendor review) | adapters built; wired in phase 3 |
 | Quota guard: park a provider when a run reports exhaustion | built, tested |
@@ -50,8 +50,8 @@ A live run:
 2. Clones the repository twice under `DISPATCHER_WORK_ROOT`.
 3. Runs the provider in the first clone with the issue as untrusted data.
 4. Applies only the resulting diff to the second, clean clone and gates it there.
-5. Pushes from the clean clone with git hooks disabled, opens a draft PR and labels
-   the issue `agent:review`.
+5. Pushes from the clean clone with Git hooks disabled, opens a draft PR and
+    labels the issue `agent:review`.
 
 A refused or failed run gets `agent:failed` and a comment with the reason. An
 exhausted provider gets `agent:parked` and is retried after `DISPATCHER_PARK_HOURS`.
