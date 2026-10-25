@@ -1,0 +1,93 @@
+[project]
+name = "agent-dispatcher"
+version = "0.1.0"
+description = "Serial, quota-aware dispatcher that turns owner-labelled issues into gated draft PRs."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28", "pydantic>=2.12", "pydantic-settings>=2.11"]
+
+[project.scripts]
+agent-dispatcher = "agent_dispatcher.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15",
+    "pyright>=1.1.400",
+    "pytest>=9.0",
+    "pytest-cov>=7.0",
+    "pre-commit>=4.0",
+    "import-linter>=2.0",
+    "deptry>=0.23",
+    "vulture>=2.14",
+]
+
+[tool.ruff]
+extend = "ruff-base.toml"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+extend-select = ["TD", "FBT"]
+ignore = ["D203", "D213", "TD003"]
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D", "PLR2004", "ANN"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+
+[tool.coverage.run]
+source = ["agent_dispatcher"]
+branch = true
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]
+
+[tool.importlinter]
+root_package = "agent_dispatcher"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Decision rules do no I/O"
+type = "forbidden"
+source_modules = [
+    "agent_dispatcher.states",
+    "agent_dispatcher.intake",
+    "agent_dispatcher.gate",
+    "agent_dispatcher.quota",
+]
+forbidden_modules = [
+    "agent_dispatcher.github",
+    "agent_dispatcher.providers",
+    "agent_dispatcher.queue",
+    "httpx",
+    "sqlite3",
+    "subprocess",
+]
+
+[tool.deptry]
+known_first_party = ["agent_dispatcher"]
+
+[tool.vulture]
+paths = ["src", "tests"]
+min_confidence = 80
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_dispatcher"]
+
+[tool.uv]
+# Same 14-day cooldown Dependabot uses: never resolve a release younger than that.
+exclude-newer = "14 days"

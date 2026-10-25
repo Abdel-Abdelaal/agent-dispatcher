@@ -32,3 +32,6 @@ Thumbs.db
 *.db-*
 coverage.xml
 requirements-audit.txt
+
+# Local run queue
+*.sqlite3
