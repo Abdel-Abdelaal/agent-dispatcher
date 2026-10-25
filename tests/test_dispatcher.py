@@ -10,6 +10,7 @@ from agent_dispatcher.github import GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.quota import Quota
+from agent_dispatcher.settings import Settings
 
 REAL_CLIENT = httpx.Client
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
@@ -81,7 +82,7 @@ def test_cli_dry_run_prints_the_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("DISPATCHER_OWNER", "owner")
-    monkeypatch.setenv("DISPATCHER_REPOS", '["o/r"]')
+    monkeypatch.setenv("DISPATCHER_REPOS", "o/r, ")
     monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
     monkeypatch.setattr(cli.httpx, "Client", github_client)
     assert cli.main(["once", "--dry-run"]) == 0
@@ -105,3 +106,8 @@ def test_describe_parked_and_empty() -> None:
     ]
     parked = Plan([], [], Task("o/r", 4, "t"), None)
     assert cli.describe(parked) == "next: o/r#4 parked"
+
+
+def test_settings_accept_a_list_or_a_comma_string() -> None:
+    assert Settings(repos=["a/b"]).repos == ["a/b"]
+    assert Settings(repos="a/b, c/d").repos == ["a/b", "c/d"]  # pyright: ignore[reportArgumentType]

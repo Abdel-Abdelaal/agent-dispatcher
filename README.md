@@ -15,7 +15,7 @@ Phase 1 skeleton. The controller runs in **dry-run only**: it polls, queues and 
 but doesn't call a model or open a PR until the owner setup below is done.
 
 | Piece | State |
-|---|---|
+| --- | --- |
 | Label state machine and SQLite run queue with a single-run lock | built, tested |
 | Owner-only intake and issue-text sanitiser | built, tested |
 | Provider adapters: `claude -p`, `codex exec`, MiMo and NVIDIA (OpenAI-compatible) | built, tested with fakes; no live call yet |

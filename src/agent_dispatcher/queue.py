@@ -66,11 +66,13 @@ class RunQueue:
     def next_task(self) -> Task | None:
         """Return the oldest task that has never had a run."""
         row = self._db.execute(
-            """SELECT t.repo, t.number, t.title FROM tasks t
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM runs r WHERE r.repo = t.repo AND r.number = t.number
-               )
-               ORDER BY t.queued_at, t.repo, t.number LIMIT 1"""
+            """
+            SELECT t.repo, t.number, t.title FROM tasks t
+            WHERE NOT EXISTS (
+                SELECT 1 FROM runs r WHERE r.repo = t.repo AND r.number = t.number
+            )
+            ORDER BY t.queued_at, t.repo, t.number LIMIT 1
+            """
         ).fetchone()
         return Task(*row) if row else None
 

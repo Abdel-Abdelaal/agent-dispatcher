@@ -24,8 +24,9 @@ Follow the handbook: https://github.com/Abdel-Abdelaal/.github/tree/main/standar
 ## Glossary
 
 One name per concept; use exactly these.
+
 | Name | Meaning | Never call it |
-|---|---|---|
+| --- | --- | --- |
 | task | one owner-labelled issue the controller works on | job, ticket, item |
 | run | one attempt at a task by one provider | session, execution |
 | provider | a model backend: claude, codex, mimo or nvidia | model, engine, backend |

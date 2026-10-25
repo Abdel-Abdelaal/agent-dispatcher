@@ -18,23 +18,23 @@ the controller (not the agent) decides what becomes a PR.
 
 ## Flow
 
-1. **Intake.** Poll `agent:ready` issues on the configured repos. An issue counts
-   only if the owner added that label: anyone can write an issue body.
-2. **Queue.** SQLite holds tasks and runs. A partial unique index allows at most
-   one unfinished run, so a crash or a second process can't start a parallel one.
-3. **Route.** Claude first, Codex if Claude is over its share or exhausted, park
-   otherwise. MiMo and NVIDIA do triage and advisory review, not coding.
-4. **Run.** The prompt goes on stdin, with the issue inside a delimited untrusted
-   block after removing HTML comments, `<details>` blocks and invisible characters.
-5. **Gate.** The controller reads the diff itself and refuses protected paths,
-   binary files, test deletions, paths outside the repo and oversized diffs.
-6. **Publish.** A draft PR from the App, then the fleet's required checks, then
-   Abdel merges.
+- **Intake.** Poll `agent:ready` issues on the configured repos. An issue counts
+  only if the owner added that label: anyone can write an issue body.
+- **Queue.** SQLite holds tasks and runs. A partial unique index allows at most
+  one unfinished run, so a crash or a second process can't start a parallel one.
+- **Route.** Claude first, Codex if Claude is over its share or exhausted, park
+  otherwise. MiMo and NVIDIA do triage and advisory review, not coding.
+- **Run.** The prompt goes on stdin, with the issue inside a delimited untrusted
+  block after removing HTML comments, `<details>` blocks and invisible characters.
+- **Gate.** The controller reads the diff itself and refuses protected paths,
+  binary files, test deletions, paths outside the repo and oversized diffs.
+- **Publish.** A draft PR from the App, then the fleet's required checks, then
+  Abdel merges.
 
 ## States
 
 | Label | Set by | Next |
-|---|---|---|
+| --- | --- | --- |
 | `agent:ready` | owner only | running, parked |
 | `agent:running` | controller | review, parked, failed |
 | `agent:parked` | controller (quota) | running, failed |
@@ -52,7 +52,7 @@ edit there would run code on every later run.
 ## Phases
 
 | Phase | Scope | State |
-|---|---|---|
+| --- | --- | --- |
 | 0 | Owner setup: CLI logins, Codex 0.162.1, NVIDIA key, GitHub App | pending |
 | 1 | This skeleton, then live Claude runs on `shortlink` docs and test tasks | skeleton done |
 | 2 | Controller-run verifiers, repro-first bug check, red-team issue attacks | planned |
