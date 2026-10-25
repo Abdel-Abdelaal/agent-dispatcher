@@ -11,18 +11,37 @@ fleet's normal required checks, and Abdel merges by hand.
 
 ## Status
 
-Phase 1. `once` runs one real task end-to-end on this laptop, which stands in for
-the VPS until the move; `once --dry-run` only plans.
+Phase 3 routing on the laptop, which stands in for the VPS until the move. `once`
+runs the next task with a team; `once --dry-run` only plans.
+
+## Who does what
+
+Claude and Codex are the strongest models with the smallest allowances, so they
+only think: short, read-only plan and review steps. MiMo and NVIDIA have the
+largest allowances, so they do the token-heavy implementation.
+
+| Step | Role | Provider, in order of preference | Harness |
+| --- | --- | --- | --- |
+| Triage | cheap screen | MiMo, else NVIDIA (chat API, JSON verdict) | HTTP |
+| Plan | thinker, read-only | Claude, else Codex | Claude Code / Codex CLI |
+| Implement | worker | MiMo, else NVIDIA, else a thinker as a last resort | Claude Code on MiMo's Anthropic API / OpenCode on NVIDIA's OpenAI API |
+| Gate | controller | protected paths, diff size, test deletions, symlinks | Git |
+| Review | the other thinker, read-only | Codex if Claude planned, and the reverse | Codex CLI / Claude Code |
+| Repair | worker | one round on the reviewer's findings, then gate and review again | as above |
+
+A provider that reports its limit is parked until the time it gives (Codex prints
+one) or for `DISPATCHER_PARK_HOURS`, and the next run forms a team without it.
+Without any thinker the task waits. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY`
+is set.
 
 | Piece | State |
 | --- | --- |
-| Label state machine and SQLite run queue with a single-run lock | built, tested |
-| Owner-only intake and issue-text sanitiser | built, tested |
-| Live run: two clones, gate on the clean one, draft PR through `gh` | built, tested against local Git repositories |
-| Claude Code adapter (CLI login or token, no user or repository settings, no Bash) | built; first live run pending |
-| Codex adapter (fallback when Claude is parked) | built, tested with fakes |
-| MiMo and NVIDIA (triage, cross-vendor review) | adapters built; wired in phase 3 |
-| Quota guard: park a provider when a run reports exhaustion | built, tested |
+| Label state machine, SQLite queue, single-run lock, owner-only intake | built, tested |
+| Live run: two clones, gate on the clean one, draft PR through `gh` | built, live-tested |
+| Claude (plan, review) on its CLI login | built, live-tested |
+| Codex (plan, review) on its ChatGPT login | built, tested with fakes |
+| MiMo (triage, implement) through Claude Code | built, harness live-tested |
+| NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ## Install

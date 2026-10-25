@@ -63,6 +63,7 @@ source_modules = [
     "agent_dispatcher.intake",
     "agent_dispatcher.gate",
     "agent_dispatcher.quota",
+    "agent_dispatcher.roles",
 ]
 forbidden_modules = [
     "agent_dispatcher.github",

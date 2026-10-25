@@ -39,3 +39,20 @@ def allows(quota: Quota, max_share: float, now: datetime) -> bool:
 def looks_exhausted(output: str) -> bool:
     """Return True if a provider's error output says its allowance is spent."""
     return bool(_EXHAUSTED.search(output))
+
+
+# Codex says when its allowance returns: "try again at Oct 26th, 2026 1:27 AM".
+_RESET = re.compile(
+    r"try again at (?P<month>[A-Z][a-z]+) (?P<day>\d{1,2})(?:st|nd|rd|th)?, "
+    r"(?P<year>\d{4}) (?P<clock>\d{1,2}:\d{2} [AP]M)"
+)
+
+
+def reset_time(message: str) -> datetime | None:
+    """Return when a provider says its allowance returns, in local time, if it says."""
+    match = _RESET.search(message)
+    if match is None:
+        return None
+    stamp = f"{match['month'][:3]} {match['day']} {match['year']} {match['clock']}"
+    # The CLI prints the user's local time without a zone.
+    return datetime.strptime(stamp, "%b %d %Y %I:%M %p").astimezone()
