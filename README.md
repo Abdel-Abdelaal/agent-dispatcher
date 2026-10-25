@@ -84,6 +84,14 @@ projects. Thank you to their authors.
 - [Codeman](https://github.com/Ark0N/Codeman): quota-aware scheduling of Claude Code
   sessions.
 
+It runs this open-source tool, unmodified, as a separate process:
+
+- [OpenCode](https://github.com/anomalyco/opencode) (MIT): the harness for MiMo and
+  NVIDIA runs, through `opencode run` with API keys only.
+
+Why these and not others is in
+[ADR 0001](docs/decisions/0001-build-vs-adopt.md).
+
 ## Contributing
 
 Changes go through pull requests with Conventional Commit titles. See the
