@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     max_weekly_share: float = Field(default=0.6, gt=0, le=1)
     max_files: int = Field(default=15, gt=0)
     max_lines: int = Field(default=400, gt=0)
+    work_root: Path = Path("runs")
+    park_hours: float = Field(default=5, gt=0)
     github_token: SecretStr | None = None
+    claude_oauth_token: SecretStr | None = None
     mimo_api_key: SecretStr | None = None
     nvidia_api_key: SecretStr | None = None
