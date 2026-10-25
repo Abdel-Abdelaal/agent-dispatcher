@@ -54,7 +54,7 @@ edit there would run code on every later run.
 | Phase | Scope | State |
 | --- | --- | --- |
 | 0 | Owner setup: CLI logins, Codex 0.162.1, NVIDIA key, GitHub App | pending |
-| 1 | This skeleton, then live Claude runs on `shortlink` docs and test tasks | skeleton done |
+| 1 | Skeleton, then live Claude runs on `shortlink` docs and test tasks | live runs built |
 | 2 | Controller-run verifiers, repro-first bug check, red-team issue attacks | planned |
 | 3 | Codex as second implementer, cross-vendor review, MiMo/GLM triage | planned |
 | 4 | Fleet rollout by language, funnel metrics in the signed telemetry | planned |

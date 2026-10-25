@@ -11,17 +11,19 @@ fleet's normal required checks, and Abdel merges by hand.
 
 ## Status
 
-Phase 1 skeleton. The controller runs in **dry-run only**: it polls, queues and plans,
-but doesn't call a model or open a PR until the owner setup below is done.
+Phase 1. `once` runs one real task end to end on this laptop, which stands in for
+the VPS until the move; `once --dry-run` only plans.
 
 | Piece | State |
 | --- | --- |
 | Label state machine and SQLite run queue with a single-run lock | built, tested |
 | Owner-only intake and issue-text sanitiser | built, tested |
-| Provider adapters: `claude -p`, `codex exec`, MiMo and NVIDIA (OpenAI-compatible) | built, tested with fakes; no live call yet |
-| Quota guard (weekly share and reset times) | built, tested; headless usage reading unverified |
-| Protected-path and diff-size gate | built, tested; not yet wired to a real run |
-| GitHub App for draft PRs, Claude `setup-token`, Codex 0.162.1, NVIDIA key | owner setup pending |
+| Live run: two clones, gate on the clean one, draft PR through `gh` | built, tested against local git repos |
+| Claude Code adapter (subscription token, no user or repo settings, no Bash) | built; first live run pending |
+| Codex adapter (fallback when Claude is parked) | built, tested with fakes |
+| MiMo and NVIDIA (triage, cross-vendor review) | adapters built; wired in phase 3 |
+| Quota guard: park a provider when a run reports exhaustion | built, tested |
+| GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ## Install
 
@@ -36,10 +38,30 @@ cp .env.example .env   # then fill in values; never commit .env
 
 ```sh
 uv run agent-dispatcher once --dry-run   # one poll cycle, prints the plan
+uv run agent-dispatcher once             # also runs the next task
 ```
 
 Issues count only if the `agent:ready` label was added by `DISPATCHER_OWNER`.
 The queue lives in `DISPATCHER_DB_PATH`; see `.env.example` for every setting.
+
+A live run:
+
+1. Labels the issue `agent:running`.
+2. Clones the repository twice under `DISPATCHER_WORK_ROOT`.
+3. Runs the provider in the first clone with the issue as untrusted data.
+4. Applies only the resulting diff to the second, clean clone and gates it there.
+5. Pushes from the clean clone with git hooks disabled, opens a draft PR and labels
+   the issue `agent:review`.
+
+A refused or failed run gets `agent:failed` and a comment with the reason. An
+exhausted provider gets `agent:parked` and is retried after `DISPATCHER_PARK_HOURS`.
+
+The agent never pushes or holds a GitHub token. It can write anything in its own
+clone, `.git/hooks` and `.git/config` included, so nothing is pushed from there.
+Claude runs with `--setting-sources local`. That ignores user settings (which may
+point Claude Code at another provider) and the repository's own
+`.claude/settings.json`, whose hooks would otherwise run. Until the agent runs in
+a sandbox it gets no Bash: it edits files, and CI runs the tests.
 
 ## Validate
 

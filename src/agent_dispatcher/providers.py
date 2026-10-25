@@ -4,11 +4,14 @@ Coding runs get an allowlisted environment. No GitHub token, no API key and no
 other secret reaches the agent; only the controller publishes.
 """
 
+import json
 import os
+import shutil
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import httpx
 from pydantic import SecretStr
@@ -16,7 +19,19 @@ from pydantic import SecretStr
 from agent_dispatcher.quota import looks_exhausted
 
 # Variables a CLI needs to find its own login, its binaries and a temp directory.
-_BASE_ENV = ("PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "LANG")
+_BASE_ENV = (
+    "PATH",
+    "PATHEXT",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "LANG",
+)
 
 Runner = Callable[[list[str], Path, str, Mapping[str, str]], tuple[int, str, str]]
 
@@ -38,19 +53,27 @@ class TermsError(RuntimeError):
 def subprocess_runner(
     argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
 ) -> tuple[int, str, str]:
-    """Run a CLI with the prompt on stdin, so it never shows up in a process list."""
+    """Run a CLI with the prompt on stdin, so it never shows up in a process list.
+
+    The program is resolved on PATH first, so Windows npm shims (`claude.cmd`) run.
+    """
+    program = shutil.which(argv[0]) or argv[0]
+    # Bytes, not text mode: on Windows text mode rewrites line endings, which
+    # breaks patches piped to `git apply`.
     completed = subprocess.run(  # noqa: S603 - argv is built here, never from input
-        argv,
+        [program, *argv[1:]],
         cwd=cwd,
-        input=stdin,
+        input=stdin.encode("utf-8"),
         env=dict(env),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
         check=False,
         timeout=3600,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    return (
+        completed.returncode,
+        completed.stdout.decode("utf-8", errors="replace"),
+        completed.stderr.decode("utf-8", errors="replace"),
+    )
 
 
 def scrubbed_env(
@@ -60,15 +83,34 @@ def scrubbed_env(
     return {name: source[name] for name in (*_BASE_ENV, *extra) if name in source}
 
 
+def _claude_error(stdout: str) -> str:
+    """Return the error text from Claude's JSON result, or "" if it succeeded."""
+    try:
+        result: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout
+    if not isinstance(result, dict):
+        return ""
+    fields = cast("dict[str, object]", result)
+    return str(fields.get("result", "")) if fields.get("is_error") else ""
+
+
 @dataclass(frozen=True)
 class ClaudeCli:
-    """Claude Code in print mode, on the subscription login from `setup-token`."""
+    """Claude Code in print mode, on the subscription token from `setup-token`."""
 
+    oauth_token: SecretStr | None = None
     max_turns: int = 40
     name: str = "claude"
 
     def argv(self) -> list[str]:
-        """Return the command line; the prompt goes on stdin."""
+        """Return the command line; the prompt goes on stdin.
+
+        `--setting-sources local` skips user settings (which may route Claude Code
+        to another provider) and the repository's own `.claude/settings.json`,
+        whose hooks would otherwise run. Without a sandbox there is no Bash: the
+        agent edits files, and CI runs the code.
+        """
         return [
             "claude",
             "-p",
@@ -76,10 +118,12 @@ class ClaudeCli:
             "json",
             "--max-turns",
             str(self.max_turns),
+            "--setting-sources",
+            "local",
             "--permission-mode",
             "acceptEdits",
             "--disallowedTools",
-            "WebFetch,WebSearch",
+            "Bash,WebFetch,WebSearch",
         ]
 
     def run(
@@ -89,10 +133,13 @@ class ClaudeCli:
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
-        """Run one task. The API key is never passed, so it can't bill the API."""
-        env = scrubbed_env(environ, ("CLAUDE_CODE_OAUTH_TOKEN",))
+        """Run one task. No API key is passed, so it can't bill the API."""
+        env = scrubbed_env(environ)
+        if self.oauth_token is not None:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = self.oauth_token.get_secret_value()
         code, stdout, stderr = runner(self.argv(), worktree, prompt, env)
-        return RunResult(self.name, code, stdout, code != 0 and looks_exhausted(stderr))
+        error = _claude_error(stdout) or stderr
+        return RunResult(self.name, code, stdout, code != 0 and looks_exhausted(error))
 
 
 @dataclass(frozen=True)

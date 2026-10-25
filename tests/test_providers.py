@@ -43,21 +43,47 @@ def test_scrubbed_env_keeps_only_the_allowlist() -> None:
     assert scrubbed_env(HOST_ENV) == {"PATH": "/usr/bin", "HOME": "/home/agent"}
 
 
-def test_claude_gets_its_login_but_no_tokens_or_api_key(tmp_path: Path) -> None:
+def test_claude_gets_its_token_but_no_other_secret(tmp_path: Path) -> None:
     runner = FakeRunner()
-    result = ClaudeCli().run("do it", tmp_path, runner, HOST_ENV)
+    claude = ClaudeCli(oauth_token=SecretStr("oauth-token"))
+    result = claude.run("do it", tmp_path, runner, HOST_ENV)
     argv, cwd, stdin, env = runner.calls[0]
     assert argv[:2] == ["claude", "-p"]
-    assert "WebFetch,WebSearch" in argv
+    assert argv[argv.index("--setting-sources") + 1] == "local"
+    assert "Bash,WebFetch,WebSearch" in argv
     assert (cwd, stdin) == (tmp_path, "do it")
     assert set(env) == {"PATH", "HOME", "CLAUDE_CODE_OAUTH_TOKEN"}
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-token"
+    assert "oauth-token" not in repr(claude)
     assert result.exit_code == 0
     assert not result.exhausted
 
 
-def test_claude_exhaustion_is_detected(tmp_path: Path) -> None:
-    runner = FakeRunner(1, "", "Claude usage limit reached")
+def test_claude_without_a_token_passes_none(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    ClaudeCli().run("x", tmp_path, runner, HOST_ENV)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in runner.calls[0][3]
+
+
+def test_claude_exhaustion_is_read_from_its_json_error(tmp_path: Path) -> None:
+    limit = json.dumps({"is_error": True, "result": "Claude usage limit reached"})
+    assert ClaudeCli().run("x", tmp_path, FakeRunner(1, limit), HOST_ENV).exhausted
+    other = json.dumps({"is_error": True, "result": "Failed to authenticate"})
+    assert not ClaudeCli().run("x", tmp_path, FakeRunner(1, other), HOST_ENV).exhausted
+
+
+def test_claude_success_text_never_counts_as_exhaustion(tmp_path: Path) -> None:
+    done = json.dumps({"is_error": False, "result": "handled the rate limit case"})
+    result = ClaudeCli().run("x", tmp_path, FakeRunner(0, done), HOST_ENV)
+    assert not result.exhausted
+
+
+def test_claude_non_json_output_is_treated_as_the_error(tmp_path: Path) -> None:
+    runner = FakeRunner(1, "usage limit reached", "")
     assert ClaudeCli().run("x", tmp_path, runner, HOST_ENV).exhausted
+    assert (
+        not ClaudeCli().run("x", tmp_path, FakeRunner(1, "[1, 2]"), HOST_ENV).exhausted
+    )
 
 
 def test_codex_runs_sandboxed_with_prompt_on_stdin(tmp_path: Path) -> None:

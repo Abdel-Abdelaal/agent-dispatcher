@@ -35,3 +35,4 @@ requirements-audit.txt
 
 # Local run queue
 *.sqlite3
+runs/

@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TEXT,
     outcome TEXT
 );
+CREATE TABLE IF NOT EXISTS parked_providers (
+    provider TEXT PRIMARY KEY,
+    until TEXT NOT NULL
+);
 -- At most one unfinished run, enforced by the database itself.
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON runs ((1))
     WHERE finished_at IS NULL;
@@ -64,12 +68,14 @@ class RunQueue:
         return cursor.rowcount == 1
 
     def next_task(self) -> Task | None:
-        """Return the oldest task that has never had a run."""
+        """Return the oldest task with no run yet, or whose runs were all parked."""
         row = self._db.execute(
             """
             SELECT t.repo, t.number, t.title FROM tasks t
             WHERE NOT EXISTS (
-                SELECT 1 FROM runs r WHERE r.repo = t.repo AND r.number = t.number
+                SELECT 1 FROM runs r
+                WHERE r.repo = t.repo AND r.number = t.number
+                AND (r.outcome IS NULL OR r.outcome != 'parked')
             )
             ORDER BY t.queued_at, t.repo, t.number LIMIT 1
             """
@@ -95,3 +101,15 @@ class RunQueue:
             "UPDATE runs SET finished_at = ?, outcome = ? WHERE id = ?",
             (now.isoformat(), outcome, run_id),
         )
+
+    def park(self, provider: str, until: datetime) -> None:
+        """Mark a provider exhausted until `until`."""
+        self._db.execute(
+            "INSERT OR REPLACE INTO parked_providers VALUES (?, ?)",
+            (provider, until.isoformat()),
+        )
+
+    def parked_until(self) -> dict[str, datetime]:
+        """Return each parked provider and when it may run again."""
+        rows = self._db.execute("SELECT provider, until FROM parked_providers")
+        return {name: datetime.fromisoformat(until) for name, until in rows}
