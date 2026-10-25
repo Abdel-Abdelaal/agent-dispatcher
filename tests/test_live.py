@@ -16,7 +16,7 @@ from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import Outcome, Provider, Run, json_reply, pr_title
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.intake import Issue
-from agent_dispatcher.providers import RunResult, subprocess_runner
+from agent_dispatcher.providers import ClaudeCli, RunResult, Tuning, subprocess_runner
 from agent_dispatcher.publish import GitHubWriter, PublishError
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
@@ -399,7 +399,11 @@ def test_configured_and_adapters_follow_the_keys() -> None:
         assert cli.triage(bare, client) is None
         full = Settings(mimo_api_key=SecretStr("m"), nvidia_api_key=SecretStr("n"))
         assert cli.configured(full) == ["claude", "codex", "mimo", "nvidia"]
-        assert set(cli.providers(full)) == {"claude", "codex", "mimo", "nvidia"}
+        adapters = cli.providers(full)
+        assert set(adapters) == {"claude", "codex", "mimo", "nvidia"}
+        claude = adapters["claude"]
+        assert isinstance(claude, ClaudeCli)
+        assert claude.think == Tuning("claude-opus-5-5", "high")
         assert cli.triage(full, client) is not None
         only_nvidia = Settings(mimo_api_key=None, nvidia_api_key=SecretStr("n"))
         assert cli.triage(only_nvidia, client) is not None

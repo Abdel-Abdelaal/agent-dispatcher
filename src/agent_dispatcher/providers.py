@@ -131,6 +131,14 @@ def _result(name: str, code: int, stdout: str, text: str, error: str) -> RunResu
 
 
 @dataclass(frozen=True)
+class Tuning:
+    """A model and effort level for one kind of step."""
+
+    model: str
+    effort: str
+
+
+@dataclass(frozen=True)
 class Gateway:
     """An Anthropic-compatible endpoint that Claude Code drives instead of Claude.
 
@@ -162,6 +170,8 @@ class ClaudeCli:
 
     oauth_token: SecretStr | None = None
     gateway: Gateway | None = None
+    think: Tuning | None = None
+    work: Tuning | None = None
     max_turns: int = 40
     name: str = "claude"
 
@@ -187,8 +197,11 @@ class ClaudeCli:
             "--disallowedTools",
             _DENY_READ_ONLY if read_only else _DENY_EDITING,
         ]
+        tuning = self.think if read_only else self.work
         if self.gateway is not None:
             argv += ["--model", self.gateway.model]
+        elif tuning is not None:
+            argv += ["--model", tuning.model, "--effort", tuning.effort]
         return argv
 
     def run(
@@ -239,11 +252,17 @@ def _codex_events(stdout: str) -> tuple[str, str]:
 class CodexCli:
     """Codex in exec mode, on the ChatGPT-plan login. Never inside GitHub Actions."""
 
+    think: Tuning | None = None
+    work: Tuning | None = None
     name: str = "codex"
 
     def argv(self, worktree: Path, *, read_only: bool) -> list[str]:
-        """Return the command line; `-` makes Codex read the prompt from stdin."""
-        return [
+        """Return the command line; `-` makes Codex read the prompt from stdin.
+
+        An explicit model and effort keep the dispatcher independent of the
+        desktop app's `config.toml`, which would otherwise decide both.
+        """
+        argv = [
             "codex",
             "exec",
             "--json",
@@ -251,8 +270,12 @@ class CodexCli:
             "read-only" if read_only else "workspace-write",
             "--cd",
             str(worktree),
-            "-",
         ]
+        tuning = self.think if read_only else self.work
+        if tuning is not None:
+            argv += ["--model", tuning.model]
+            argv += ["--config", f"model_reasoning_effort={tuning.effort}"]
+        return [*argv, "-"]
 
     def run(
         self,

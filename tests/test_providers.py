@@ -10,6 +10,7 @@ from agent_dispatcher.providers import (
     ClaudeCli,
     CodexCli,
     TermsError,
+    Tuning,
     mimo,
     mimo_worker,
     nvidia,
@@ -272,3 +273,32 @@ def test_nvidia_rate_limit_parks_the_worker(tmp_path: Path) -> None:
         .run("x", worktree, runner=runner, environ=HOST_ENV)
         .exhausted
     )
+
+
+def test_thinking_and_working_use_their_own_model_and_effort(tmp_path: Path) -> None:
+    claude = ClaudeCli(
+        think=Tuning("claude-opus-5-5", "high"),
+        work=Tuning("claude-sonnet-5-5", "medium"),
+    )
+    think = claude.argv(read_only=True)
+    work = claude.argv(read_only=False)
+    assert think[think.index("--model") + 1 :][:3] == [
+        "claude-opus-5-5",
+        "--effort",
+        "high",
+    ]
+    assert work[work.index("--model") + 1 :][:3] == [
+        "claude-sonnet-5-5",
+        "--effort",
+        "medium",
+    ]
+    assert "--model" not in ClaudeCli().argv(read_only=True)
+    codex = CodexCli(
+        think=Tuning("gpt-6.1-sol", "high"), work=Tuning("gpt-6.1-sol", "medium")
+    )
+    argv = codex.argv(tmp_path, read_only=True)
+    assert argv[argv.index("--model") + 1] == "gpt-6.1-sol"
+    assert argv[argv.index("--config") + 1] == "model_reasoning_effort=high"
+    assert argv[-1] == "-"
+    assert "model_reasoning_effort=medium" in codex.argv(tmp_path, read_only=False)
+    assert "--model" not in CodexCli().argv(tmp_path, read_only=True)

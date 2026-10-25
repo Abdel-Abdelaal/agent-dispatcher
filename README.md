@@ -20,14 +20,22 @@ Claude and Codex are the strongest models with the smallest allowances, so they
 only think: short, read-only plan and review steps. MiMo and NVIDIA have the
 largest allowances, so they do the token-heavy implementation.
 
-| Step | Role | Provider, in order of preference | Harness |
+| Step | Role | Provider, in order of preference | Model and effort (default) |
 | --- | --- | --- | --- |
-| Triage | cheap screen | MiMo, else NVIDIA (chat API, JSON verdict) | HTTP |
-| Plan | thinker, read-only | Claude, else Codex | Claude Code / Codex CLI |
-| Implement | worker | MiMo, else NVIDIA, else a thinker as a last resort | Claude Code on MiMo's Anthropic API / OpenCode on NVIDIA's OpenAI API |
-| Gate | controller | protected paths, diff size, test deletions, symlinks | Git |
-| Review | the other thinker, read-only | Codex if Claude planned, and the reverse | Codex CLI / Claude Code |
-| Repair | worker | one round on the reviewer's findings, then gate and review again | as above |
+| Triage | cheap screen | MiMo, else NVIDIA (chat API, JSON verdict) | `mimo-v2.6-flash`, thinking off |
+| Plan | thinker, read-only | Claude, else Codex | `claude-opus-5-5` high / `gpt-6.1-sol` high |
+| Implement | worker | MiMo (Claude Code harness), else NVIDIA (OpenCode) | `mimo-v2.6-flash` / `z-ai/glm-5.3-flash` |
+| Implement, last resort | thinker | Claude, else Codex, when both workers are out | `claude-sonnet-5-5` medium / `gpt-6.1-sol` medium |
+| Gate | controller | protected paths, diff size, test deletions, symlinks | none |
+| Review | the other thinker, read-only | Codex if Claude planned, and the reverse | same as Plan |
+| Repair | worker | one round on the reviewer's findings, then gate and review again | as Implement |
+
+Quality is spent where it pays: a precise plan lets the cheaper worker get it right
+first time, and the review is the last check before a human. Both are short, so
+high effort costs little; `xhigh` and `max` would drain the scarce weekly allowance.
+Every model and effort is a `DISPATCHER_*` setting (see `.env.example`), and the
+dispatcher passes them explicitly, so changing the Codex app's `config.toml` doesn't
+change the dispatcher.
 
 A provider that reports its limit is parked until the time it gives (Codex prints
 one) or for `DISPATCHER_PARK_HOURS`, and the next run forms a team without it.
