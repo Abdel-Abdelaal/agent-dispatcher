@@ -1,0 +1,2 @@
+# Super-linter reads this file; extend the project config so both run the same rules.
+extend = "../../pyproject.toml"

@@ -11,16 +11,16 @@ fleet's normal required checks, and Abdel merges by hand.
 
 ## Status
 
-Phase 1 skeleton (in progress). The controller will run in **dry-run only**: it polls, plans and gates,
-but won't call a model or open a PR until the owner setup below is done.
+Phase 1 skeleton. The controller runs in **dry-run only**: it polls, queues and plans,
+but doesn't call a model or open a PR until the owner setup below is done.
 
 | Piece | State |
-|---|---|
-| Label state machine and SQLite run queue with a single-run lock | planned |
-| Owner-only intake and issue-text sanitiser | planned |
-| Provider adapters: `claude -p`, `codex exec`, MiMo and NVIDIA (OpenAI-compatible) | planned |
-| Quota guard (weekly share and reset times) | planned |
-| Protected-path and diff-size gate | planned |
+| --- | --- |
+| Label state machine and SQLite run queue with a single-run lock | built, tested |
+| Owner-only intake and issue-text sanitiser | built, tested |
+| Provider adapters: `claude -p`, `codex exec`, MiMo and NVIDIA (OpenAI-compatible) | built, tested with fakes; no live call yet |
+| Quota guard (weekly share and reset times) | built, tested; headless usage reading unverified |
+| Protected-path and diff-size gate | built, tested; not yet wired to a real run |
 | GitHub App for draft PRs, Claude `setup-token`, Codex 0.162.1, NVIDIA key | owner setup pending |
 
 ## Install
@@ -37,6 +37,23 @@ cp .env.example .env   # then fill in values; never commit .env
 ```sh
 uv run agent-dispatcher once --dry-run   # one poll cycle, prints the plan
 ```
+
+Issues count only if the `agent:ready` label was added by `DISPATCHER_OWNER`.
+The queue lives in `DISPATCHER_DB_PATH`; see `.env.example` for every setting.
+
+## Validate
+
+```sh
+uv run ruff format --check .
+uv run ruff check .
+uv run pyright
+uv run pytest --cov --cov-branch
+uv run lint-imports && uv run deptry . && uv run vulture
+```
+
+The import contract keeps the decision rules (`states`, `intake`, `gate`, `quota`)
+free of network, subprocess and database code, so they're tested as pure functions.
+The lockfile never resolves a release younger than 14 days (`exclude-newer`).
 
 ## How a task flows
 
