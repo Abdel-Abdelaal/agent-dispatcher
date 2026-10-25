@@ -43,7 +43,7 @@ def looks_exhausted(output: str) -> bool:
 
 # Codex says when its allowance returns: "try again at Oct 26th, 2026 1:27 AM".
 _RESET = re.compile(
-    r"try again at (?P<month>[A-Z][a-z]+) (?P<day>\d{1,2})(?:st|nd|rd|th)?, "
+    r"try again at (?P<month>[A-Z][a-z]+) (?P<day>\d{1,2})(?:[a-z]{2})?, "
     r"(?P<year>\d{4}) (?P<clock>\d{1,2}:\d{2} [AP]M)"
 )
 
