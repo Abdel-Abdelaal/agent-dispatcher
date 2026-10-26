@@ -43,6 +43,7 @@ def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
         config = json.loads(worker.config(read_only=read_only, steps=7))
         assert config["agent"]["build"]["steps"] == 7
         assert config["permission"]["*"] == "deny"
+        assert config["agent"]["build"]["permission"] == config["permission"]
         assert config["permission"]["external_directory"] == "deny"
         assert config["permission"]["read"]["*.env"] == "deny"
         assert config["permission"]["edit"] == ("deny" if read_only else "allow")
