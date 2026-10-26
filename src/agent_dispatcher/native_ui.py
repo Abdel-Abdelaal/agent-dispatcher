@@ -29,6 +29,8 @@ delegate real background plan/code/review runs, which can take many minutes.
 Discover repo names with trifecta_list_repos instead of making the owner fill a
 form. Discuss goals naturally. For a coding request, inspect relevant context,
 write a focused task with regression checks, queue it, then start the team.
+Use a Conventional title for queued tasks (feat/fix/docs/refactor/test/chore)
+so the eventual PR describes the actual change accurately.
 For a test request, propose a meaningful bounded task, not pointless time padding.
 Use trifecta_status and inspect_pr/list_work to report actual results, never
 assume a queued task completed. Tasks run serially, not always immediately.

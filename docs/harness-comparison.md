@@ -29,6 +29,25 @@ events. Unknown usage stays unknown. The existing pre-retention scanner and
 hosted signing pipeline continue to handle telemetry. Native step limits and
 wall-clock timeout bound each invocation; no paid capacity is provisioned.
 
+The MiMo OpenCode adapter makes reasoning explicit and configurable with
+`DISPATCHER_MIMO_REASONING=enabled` (default) or `disabled`. The enabled default
+preserves MiMo's normal reasoning behavior. The interactive front end's faster
+non-reasoning mode and the 14.922-second file-tool smoke do not establish which
+mode produces better application code. Record the mode in each evaluation;
+compare correctness, reuse, regressions and usage as well as elapsed time.
+
+The adapter declares reasoning capability and the `reasoning_content` interleaved
+field, following [OpenCode's pinned transform](https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/provider/transform.ts#L321).
+A synthetic local endpoint tested the actual executable: reasoning enabled,
+file-tool result returned, and the synthetic reasoning marker returned on the
+next request. No live inference was used. This verifies transport continuity,
+not resumable sessions or application correctness.
+
+Both modes restrict the provider and auxiliary model to MiMo. The earlier
+exploratory attempt remains a failed attempt; reasoning time alone is not its
+failure criterion. It did not complete within the declared evaluation budget.
+[Xiaomi documents both modes](https://mimo.mi.com/docs/api/text-generation/openai-api).
+
 ## Comparison protocol
 
 1. Keep the model, issue body, base commit and independent acceptance tests fixed.

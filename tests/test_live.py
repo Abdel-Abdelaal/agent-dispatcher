@@ -220,7 +220,8 @@ def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> 
     assert "Co-Authored-By: Codex" in message
     body = gh.pr_body()
     assert "**claude** planned, **mimo** implemented, **codex** reviewed" in body
-    assert "Review 1 (codex, medium): Looks right." in body
+    assert "Plan SHA256:" in body
+    assert "Looks right." not in body
     assert not (tmp_path / "work" / "pwned").exists()
 
 
@@ -361,8 +362,26 @@ def test_gh_failures_raise(tmp_path: Path) -> None:
 
 def test_pr_title_is_conventional_and_bounded() -> None:
     long = Issue("o/r", 1, "Fix " + "x" * 200, "", ("bug",), "owner")
-    assert pr_title(long).startswith("chore: fix x")
+    assert pr_title(long).startswith("fix: fix x")
     assert len(pr_title(long)) <= 72
+
+
+@pytest.mark.parametrize(
+    ("title", "labels", "expected"),
+    [
+        ("feat(api): support HEAD", (), "feat(api): support HEAD"),
+        ("fix!: remove unsafe behavior", (), "fix!: remove unsafe behavior"),
+        ("Add previews", ("enhancement",), "feat: add previews"),
+        ("Explain preview", ("documentation",), "docs: explain preview"),
+        ("do: strange header", (), "chore: do: strange header"),
+    ],
+)
+def test_pr_title_preserves_valid_intent_without_double_prefix(
+    title: str,
+    labels: tuple[str, ...],
+    expected: str,
+) -> None:
+    assert pr_title(Issue("o/r", 1, title, "", labels, "owner")) == expected
 
 
 def test_json_reply_finds_the_object_or_nothing() -> None:
@@ -1130,6 +1149,99 @@ def test_out_of_turns_at_hard_fails_with_the_reason(
         "mimo failed while implementing (it ran out of turns even at the hard level).",
     )
     assert worker.turns == [40]
+
+
+def test_read_only_planner_turn_cap_does_not_restart_its_conversation(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    planner = TurnLimited("claude", 3)
+    worker, reviewer = FakeModel("mimo"), FakeModel("codex")
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    outcome = run.execute()
+    assert outcome.state is State.FAILED
+    assert "no restart escalation" in outcome.detail
+    assert planner.turns == [10]
+    assert worker.prompts == []
+    assert reviewer.prompts == []
+
+
+def test_read_only_reviewer_turn_cap_does_not_restart_or_authorize_repairs(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    planner = FakeModel("claude", ["1. plan"])
+    worker = FakeModel("mimo", edits=[{"a.md": "change\n"}])
+    reviewer = TurnLimited("codex", 3)
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    assert run.execute().state is State.FAILED
+    assert reviewer.turns == [10]
+    assert len(worker.prompts) == 1
+
+
+def test_credential_in_worker_patch_is_refused_before_push(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    sensitive = "held-controller-secret-value"
+    planner, worker, reviewer = models([{"a.md": sensitive}], [APPROVE])
+    gh = FakeGh()
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), gh)
+    run.telemetry = Telemetry(tmp_path / "telemetry", secrets=[sensitive])
+    assert run.execute().state is State.FAILED
+    assert reviewer.prompts == []
+    assert not any(argv[1:3] == ["pr", "create"] for argv, _ in gh.calls)
+    assert sensitive not in str(gh.calls)
+
+
+def test_raw_plan_and_reviewer_text_do_not_enter_public_pr(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    sensitive = "held-controller-secret-value"
+    planner = FakeModel("claude", ["1. Plan with " + sensitive])
+    worker = FakeModel("mimo", edits=[{"a.md": "safe change\n"}])
+    reviewer = FakeModel("codex", [json.dumps({"approve": True, "summary": sensitive})])
+    gh = FakeGh()
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), gh)
+    run.telemetry = Telemetry(tmp_path / "telemetry", secrets=[sensitive])
+    assert run.execute().state is State.REVIEW
+    assert sensitive not in gh.pr_body()
+    assert "1. Plan with" not in gh.pr_body()
+
+
+def test_declined_model_reason_is_redacted_before_issue_comment(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    sensitive = "held-controller-secret-value"
+    planner, worker, reviewer = models([], [])
+    gh = FakeGh()
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        gh,
+        triage=json.dumps({"proceed": False, "reason": sensitive}),
+    )
+    run.telemetry = Telemetry(tmp_path / "telemetry", secrets=[sensitive])
+    outcome = run.execute()
+    assert outcome.state is State.FAILED
+    assert sensitive not in outcome.detail
+    assert sensitive not in str(gh.calls)
+    assert "[REDACTED]" in outcome.detail
 
 
 def test_repair_does_not_wait_for_advisory_or_optional_checks() -> None:

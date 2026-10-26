@@ -51,6 +51,14 @@ def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
         assert config["plugin"] == []
         assert config["lsp"] is False
         assert config["formatter"] is False
+        assert config["enabled_providers"] == ["worker"]
+        assert config["small_model"] == "worker/mimo-v2.6-flash"
+        model = config["provider"]["worker"]["models"]["mimo-v2.6-flash"]
+        assert model["reasoning"] is True
+        assert model["interleaved"] == {"field": "reasoning_content"}
+        assert config["provider"]["worker"]["models"]["mimo-v2.6-flash"]["options"] == {
+            "thinking": {"type": "enabled"},
+        }
         assert "test-only" not in json.dumps(config)
 
 
@@ -98,7 +106,13 @@ def test_cli_requires_explicit_alternative_harness_selection() -> None:
         mimo_api_key=SecretStr("test-only"),
         mimo_harness="opencode",
         opencode_executable="D:/trusted/opencode.exe",
+        mimo_reasoning="disabled",
     )
     adapter = cli.providers(settings)["mimo"]
     assert isinstance(adapter, MiMoOpenCode)
     assert adapter.executable == "D:/trusted/opencode.exe"
+    assert adapter.reasoning == "disabled"
+    config = json.loads(adapter.config(read_only=True, steps=7))
+    assert config["provider"]["worker"]["models"]["mimo-v2.6-flash"]["options"] == {
+        "thinking": {"type": "disabled"},
+    }

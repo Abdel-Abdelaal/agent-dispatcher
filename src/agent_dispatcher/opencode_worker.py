@@ -6,7 +6,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import SecretStr
 
@@ -62,6 +62,7 @@ class MiMoOpenCode:
     api_key: SecretStr
     executable: str = "opencode"
     name: str = "mimo"
+    reasoning: Literal["enabled", "disabled"] = "enabled"
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -74,6 +75,9 @@ class MiMoOpenCode:
             ),
         )
         config.update(
+            enabled_providers=["worker"],
+            model="worker/" + MIMO_MODEL,
+            small_model="worker/" + MIMO_MODEL,
             permission={
                 "*": "deny",
                 "read": {
@@ -94,6 +98,12 @@ class MiMoOpenCode:
             lsp=False,
             formatter=False,
         )
+        model = config["provider"]["worker"]["models"][MIMO_MODEL]
+        model["reasoning"] = True
+        model["interleaved"] = {"field": "reasoning_content"}
+        model["options"] = {
+            "thinking": {"type": self.reasoning},
+        }
         # Explicitly override built-in agent defaults as well as global policy.
         # Otherwise a built-in permission (for example questions) can take precedence.
         config["agent"]["build"]["permission"] = config["permission"]

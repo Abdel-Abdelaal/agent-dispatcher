@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     max_lines: int = Field(default=400, gt=0)
     work_root: Path = Path("runs")
     park_hours: float = Field(default=5, gt=0)
+    cycle_timeout_seconds: int = Field(default=1800, ge=60, le=7200)
+    run_lease_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     allow_worker_thinking: bool = False
     disabled_providers: Annotated[
         list[str], NoDecode, BeforeValidator(_split_repos)
@@ -72,5 +74,6 @@ class Settings(BaseSettings):
     codex_work_effort: CodexEffort = "medium"
     mimo_api_key: SecretStr | None = None
     mimo_harness: Literal["claude-code", "opencode"] = "claude-code"
+    mimo_reasoning: Literal["enabled", "disabled"] = "enabled"
     opencode_executable: str = "opencode"
     nvidia_api_key: SecretStr | None = None

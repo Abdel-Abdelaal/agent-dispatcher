@@ -8,6 +8,10 @@ from pathlib import Path
 from agent_dispatcher.intake import Issue
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS cycles (
+    lease_id TEXT PRIMARY KEY, pid INTEGER NOT NULL, birth REAL NOT NULL,
+    deadline TEXT NOT NULL, finished_at TEXT, outcome TEXT
+);
 CREATE TABLE IF NOT EXISTS tasks (
     repo TEXT NOT NULL,
     number INTEGER NOT NULL,
@@ -63,6 +67,16 @@ class RunRecord:
     outcome: str | None
 
 
+@dataclass(frozen=True)
+class CycleLease:
+    """A controller child process identity and its persisted cycle deadline."""
+
+    lease_id: str
+    pid: int
+    birth: float
+    deadline: str
+
+
 class RunActiveError(RuntimeError):
     """Another run hasn't finished; runs are strictly serial."""
 
@@ -74,6 +88,9 @@ class RunQueue:
         """Open or create the queue database."""
         self._db = sqlite3.connect(path, isolation_level=None)
         self._db.executescript(_SCHEMA)
+        columns = {row[1] for row in self._db.execute("PRAGMA table_info(runs)")}
+        if "lease_id" not in columns:
+            self._db.execute("ALTER TABLE runs ADD COLUMN lease_id TEXT")
 
     def close(self) -> None:
         """Close the database."""
@@ -117,13 +134,15 @@ class RunQueue:
         tasks = self.waiting()
         return tasks[0] if tasks else None
 
-    def start_run(self, task: Task, provider: str, now: datetime) -> int:
+    def start_run(
+        self, task: Task, provider: str, now: datetime, *, lease_id: str | None = None
+    ) -> int:
         """Record a run start, or raise if one is already active."""
         try:
             cursor = self._db.execute(
-                "INSERT INTO runs (repo, number, provider, started_at)"
-                " VALUES (?, ?, ?, ?)",
-                (task.repo, task.number, provider, now.isoformat()),
+                "INSERT INTO runs (repo, number, provider, started_at, lease_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (task.repo, task.number, provider, now.isoformat(), lease_id),
             )
         except sqlite3.IntegrityError as error:
             message = "another run is still active"
@@ -158,11 +177,19 @@ class RunQueue:
 
     def record_repair(
         self, repo: str, pr: int, sha: str, outcome: str, now: datetime
-    ) -> None:
+    ) -> int:
         """Remember a repair attempt, so a PR is never repaired twice for one cap."""
-        self._db.execute(
+        cursor = self._db.execute(
             "INSERT INTO repairs VALUES (?, ?, ?, ?, ?)",
             (repo, pr, sha, outcome, now.isoformat()),
+        )
+        return int(cursor.lastrowid or 0)
+
+    def finish_repair(self, attempt: int, outcome: str, now: datetime) -> None:
+        """Finish a reserved attempt; interruption never refunds its allowance."""
+        self._db.execute(
+            "UPDATE repairs SET outcome=?,at=? WHERE rowid=?",
+            (outcome, now.isoformat(), attempt),
         )
 
     def waiting(self) -> list[Task]:
@@ -189,3 +216,60 @@ class RunQueue:
             (limit,),
         )
         return [RunRecord(*row) for row in rows]
+
+    def register_cycle(self, lease: CycleLease) -> None:
+        """Record only a process started by the supervisor, never an arbitrary PID."""
+        self._db.execute(
+            "INSERT INTO cycles (lease_id,pid,birth,deadline) VALUES (?,?,?,?)",
+            (lease.lease_id, lease.pid, lease.birth, lease.deadline),
+        )
+
+    def active_cycles(self) -> list[CycleLease]:
+        """Return unfinished leases, including those surviving a restart."""
+        return [
+            CycleLease(*row)
+            for row in self._db.execute(
+                "SELECT lease_id,pid,birth,deadline FROM cycles "
+                "WHERE finished_at IS NULL"
+            )
+        ]
+
+    def cycle_has_active_run(self, lease_id: str) -> bool:
+        """Return whether this exact child left an unfinished run."""
+        return (
+            self._db.execute(
+                "SELECT 1 FROM runs WHERE lease_id=? AND finished_at IS NULL",
+                (lease_id,),
+            ).fetchone()
+            is not None
+        )
+
+    def settle_cycle(
+        self, lease_id: str, outcome: str, now: datetime
+    ) -> list[RunRecord]:
+        """Finish exact-lease orphans, preserving all history and repair allowances."""
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            records = [
+                RunRecord(*row)
+                for row in self._db.execute(
+                    "SELECT id,repo,number,provider,started_at,finished_at,outcome "
+                    "FROM runs WHERE lease_id=? AND finished_at IS NULL",
+                    (lease_id,),
+                )
+            ]
+            self._db.execute(
+                "UPDATE runs SET finished_at=?,outcome=? WHERE lease_id=? "
+                "AND finished_at IS NULL",
+                (now.isoformat(), outcome, lease_id),
+            )
+            self._db.execute(
+                "UPDATE cycles SET finished_at=?,outcome=? WHERE lease_id=? "
+                "AND finished_at IS NULL",
+                (now.isoformat(), outcome, lease_id),
+            )
+            self._db.execute("COMMIT")
+        except sqlite3.Error:
+            self._db.execute("ROLLBACK")
+            raise
+        return records

@@ -28,6 +28,11 @@ if ($Mode -eq 'status') {
 
 $task = Get-ScheduledTask -TaskName 'agent-dispatcher'
 if ($task.State -eq 'Running') {
+    if ($Mode -eq 'start') {
+        Write-Output 'A cycle is already active; provider settings were not changed.'
+        Write-Output 'No duplicate started. Use mimo status; queued work waits for a later cycle.'
+        return
+    }
     throw 'A run is already active. Use mimo status; try mimo after it finishes.'
 }
 if ($task.State -eq 'Disabled') {
@@ -71,7 +76,6 @@ try {
     $settings = [ordered]@{
         DISPATCHER_DISABLED_PROVIDERS = 'claude,codex,nvidia'
         DISPATCHER_ALLOW_WORKER_THINKING = 'true'
-        DISPATCHER_MIMO_HARNESS = 'claude-code'
     }
     foreach ($key in $settings.Keys) {
         $pattern = '(?m)^' + [regex]::Escape($key) + '=.*$'
