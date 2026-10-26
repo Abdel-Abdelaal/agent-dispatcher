@@ -9,7 +9,7 @@ the other thinker from the planner wherever both are available.
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -21,6 +21,7 @@ from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
 from agent_dispatcher.states import State
+from agent_dispatcher.telemetry import Telemetry, output_fields, sha256
 from agent_dispatcher.workspace import GitError, Workspace
 
 TRIAGE = """\
@@ -138,6 +139,20 @@ def json_reply(text: str) -> dict[str, object] | None:
     return cast("dict[str, object]", value) if isinstance(value, dict) else None
 
 
+def _plan_verdict(text: str) -> str:
+    """Name a plan reply's outcome for telemetry."""
+    _, plan = split_rating(text)
+    return "refused" if plan.upper().startswith("REFUSE:") else "ok"
+
+
+def _review_verdict(text: str) -> str:
+    """Name a review reply's outcome for telemetry."""
+    verdict = json_reply(text)
+    if verdict is None:
+        return "invalid_json"
+    return "approved" if verdict.get("approve") is True else "rejected"
+
+
 def _fenced(label: str, text: str) -> str:
     return f"<<<{label}>>>\n{text.strip()}\n<<<END_{label}>>>"
 
@@ -161,18 +176,101 @@ class Run:
     level: Level = Level.MEDIUM
     remote: str = "https://github.com/{repo}.git"
     notes: list[str] = field(default_factory=list[str])
+    telemetry: Telemetry | None = None
+    triage_model: str | None = None
+    branch: str | None = None
+    attempts: int = 0
+
+    def _record(self, stage: str, provider: str, **fields: object) -> None:
+        """Write one telemetry record for this run, if telemetry is on."""
+        if self.telemetry is None:
+            return
+        self.attempts += 1
+        self.telemetry.record(
+            run_id=self.run_id,
+            attempt=self.attempts,
+            repo=self.issue.repo,
+            issue=self.issue.number,
+            branch=self.branch,
+            stage=stage,
+            provider=provider,
+            level=self.level.label,
+            available_usage=None,
+            **fields,
+        )
+
+    def _record_call(  # noqa: PLR0913 - one record describes the whole call
+        self,
+        stage: str,
+        name: str,
+        prompt: str,
+        result: RunResult,
+        started: datetime,
+        *,
+        read_only: bool,
+        outcome: str,
+        context: Mapping[str, str] | None = None,
+    ) -> None:
+        finished = datetime.now(UTC)
+        self._record(
+            stage,
+            name,
+            harness=result.harness,
+            model=result.model,
+            effort=result.effort,
+            read_only=read_only,
+            started_at=started.isoformat(),
+            finished_at=finished.isoformat(),
+            duration_ms=int((finished - started).total_seconds() * 1000),
+            prompt_sha256=sha256(prompt),
+            prompt_chars=len(prompt),
+            context_sha256=dict(context or {}),
+            outcome=outcome,
+            exit_code=result.exit_code,
+            exhausted=result.exhausted,
+            resets_at=result.resets_at.isoformat() if result.resets_at else None,
+            usage=result.usage,
+            **output_fields(result.text),
+        )
 
     def _tuning(self, name: str) -> Tuning | None:
         """Return the thinking model and effort for `name` at the current level."""
         step = self.ladder.get(name, {}).get(self.level.label)
         return Tuning(*step) if step else None
 
-    def _step(
-        self, name: str, stage: str, prompt: str, clone: Path, *, read_only: bool
+    def _step(  # noqa: PLR0913 - the telemetry stage and context ride along
+        self,
+        name: str,
+        stage: str,
+        prompt: str,
+        clone: Path,
+        *,
+        read_only: bool,
+        kind: str,
+        context: Mapping[str, str] | None = None,
+        verdict: Callable[[str], str] | None = None,
     ) -> str:
+        """Run one model call, record it, and stop the run if it failed or ran out."""
         tuning = self._tuning(name) if read_only else None
+        started = datetime.now(UTC)
         result = self.providers[name].run(
             prompt, clone, read_only=read_only, tuning=tuning
+        )
+        if result.exhausted:
+            outcome = "exhausted"
+        elif result.exit_code != 0:
+            outcome = "failed"
+        else:
+            outcome = verdict(result.text) if verdict else "ok"
+        self._record_call(
+            kind,
+            name,
+            prompt,
+            result,
+            started,
+            read_only=read_only,
+            outcome=outcome,
+            context=context,
         )
         if result.exhausted:
             raise Stop(
@@ -188,24 +286,53 @@ class Run:
     def _screen(self) -> None:
         if self.triage is None:
             self.notes.append("Triage: skipped (no triage model configured).")
+            self._record("triage", "none", outcome="skipped")
             return
+        prompt = f"{TRIAGE}\n{untrusted_block(self.issue)}"
+        started = datetime.now(UTC)
+        base: dict[str, object] = {
+            "harness": "chat-api",
+            "model": self.triage_model,
+            "read_only": True,
+            "started_at": started.isoformat(),
+            "prompt_sha256": sha256(prompt),
+            "prompt_chars": len(prompt),
+            "usage": None,
+        }
         try:
-            verdict = json_reply(self.triage(TRIAGE, untrusted_block(self.issue)))
+            reply = self.triage(TRIAGE, untrusted_block(self.issue))
         except Exception as error:  # noqa: BLE001 - triage is advisory; the plan can still refuse
             self.notes.append(f"Triage: unavailable ({type(error).__name__}).")
+            self._record("triage", "triage", outcome="unavailable", **base)
             return
-        if verdict is not None and verdict.get("proceed") is False:
-            raise Stop(self._failure(f"Triage declined: {verdict.get('reason', '')}"))
+        verdict = json_reply(reply)
+        declined = verdict is not None and verdict.get("proceed") is False
         rated = parse_level(verdict.get("difficulty")) if verdict else None
         self.level = rated or self.level
+        outcome = "declined" if declined else "proceed"
+        self._record(
+            "triage", "triage", outcome=outcome, **base, **output_fields(reply)
+        )
+        if declined and verdict is not None:
+            raise Stop(self._failure(f"Triage declined: {verdict.get('reason', '')}"))
         self.notes.append(f"Triage: proceed, rated {self.level.label}.")
 
     def _plan(self, clone: Path) -> str:
         """Plan at the current level; plan again once if the planner rates it harder."""
         prompt = f"{PLAN}\n{untrusted_block(self.issue)}\n"
         planned_at = self.level
+        issue_hash = {"issue": sha256(untrusted_block(self.issue))}
         rating, plan = split_rating(
-            self._step(self.team.planner, "planning", prompt, clone, read_only=True)
+            self._step(
+                self.team.planner,
+                "planning",
+                prompt,
+                clone,
+                read_only=True,
+                kind="plan",
+                context=issue_hash,
+                verdict=_plan_verdict,
+            )
         )
         if rating is not None and rating > planned_at:
             self.level = rating
@@ -213,7 +340,16 @@ class Run:
                 f"Planner rated it {rating.label}, so it planned again at that level."
             )
             rating, plan = split_rating(
-                self._step(self.team.planner, "planning", prompt, clone, read_only=True)
+                self._step(
+                    self.team.planner,
+                    "planning",
+                    prompt,
+                    clone,
+                    read_only=True,
+                    kind="plan",
+                    context=issue_hash,
+                    verdict=_plan_verdict,
+                )
             )
         elif rating is not None and rating != planned_at:
             self.level = rating
@@ -227,7 +363,15 @@ class Run:
         if findings:
             prompt += f"{REPAIR}{_fenced('FINDINGS', findings)}\n"
         prompt += f"{untrusted_block(self.issue)}\n"
-        self._step(self.team.worker, "implementing", prompt, clone, read_only=False)
+        self._step(
+            self.team.worker,
+            "implementing",
+            prompt,
+            clone,
+            read_only=False,
+            kind="repair" if findings else "implement",
+            context={"plan": sha256(plan)},
+        )
 
     def _gate(
         self, agent_clone: Path, attempt: int, branch: str | None = None
@@ -247,18 +391,40 @@ class Run:
             ) from error
         reasons = refusals(changes, self.limits)
         reasons += [f"symbolic link: {path}" for path in symlinks]
+        self._record(
+            "gate",
+            "controller",
+            outcome="refused" if reasons else "passed",
+            gate_refusals=reasons,
+            files=[change.path for change in changes],
+            lines=sum((c.added or 0) + (c.deleted or 0) for c in changes),
+            context_sha256={"diff": sha256(patch)},
+        )
         if reasons:
             lines = "\n".join(f"- {reason}" for reason in reasons)
             raise Stop(self._failure(f"The gate refused the change:\n{lines}"))
         return clone, patch
 
-    def _review(self, clone: Path, plan: str, patch: str) -> tuple[bool, str, str]:
+    def _review(
+        self, clone: Path, plan: str, patch: str, kind: str = "review"
+    ) -> tuple[bool, str, str]:
         prompt = (
             f"{REVIEW}\n{untrusted_block(self.issue)}\n{_fenced('PLAN', plan)}\n"
             f"{_fenced('DIFF', patch)}\n"
         )
         reply = self._step(
-            self.team.reviewer, "reviewing", prompt, clone, read_only=True
+            self.team.reviewer,
+            "reviewing",
+            prompt,
+            clone,
+            read_only=True,
+            kind=kind,
+            context={
+                "issue": sha256(untrusted_block(self.issue)),
+                "plan": sha256(plan),
+                "diff": sha256(patch),
+            },
+            verdict=_review_verdict,
         )
         verdict = json_reply(reply)
         if verdict is None:
@@ -342,6 +508,8 @@ class Run:
             "[agent-dispatcher](https://github.com/Abdel-Abdelaal/agent-dispatcher)\n"
         )
         pr_url = self.writer.draft_pr(repo, branch, base, title, body)
+        self.branch = branch
+        self._record("publish", "controller", outcome="ok", pr_url=pr_url)
         self.writer.move(repo, number, State.RUNNING, State.REVIEW)
         self.writer.comment(repo, number, f"Draft PR for review: {pr_url}")
         return Outcome(State.REVIEW, pr_url)
@@ -370,11 +538,20 @@ class Run:
         prompt = (
             f"{REPAIR_CI}\n{_fenced('CI_LOG', logs)}\n{untrusted_block(self.issue)}\n"
         )
+        self.branch = pr.branch
         self._step(
-            self.team.worker, "repairing CI", prompt, agent_clone, read_only=False
+            self.team.worker,
+            "repairing CI",
+            prompt,
+            agent_clone,
+            read_only=False,
+            kind="ci_repair",
+            context={"ci_log": sha256(logs)},
         )
         clone, patch = self._gate(agent_clone, 1, pr.branch)
-        approved, summary, findings = self._review(clone, REPAIR_CI_PLAN, patch)
+        approved, summary, findings = self._review(
+            clone, REPAIR_CI_PLAN, patch, kind="ci_review"
+        )
         if not approved:
             return self._failure(
                 f"The reviewer rejected the repair: {summary}\n{findings}"
@@ -385,4 +562,6 @@ class Run:
             f"Agent-Reviewer: {self.team.reviewer}\nAgent-Level: {self.level.label}\n"
         )
         self.workspace.push_update(clone, pr.branch, message)
+        pr_url = f"https://github.com/{self.issue.repo}/pull/{pr.number}"
+        self._record("publish", "controller", outcome="ok", pr_url=pr_url)
         return Outcome(State.REVIEW, summary or "Repair pushed.")

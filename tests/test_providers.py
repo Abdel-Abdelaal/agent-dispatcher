@@ -307,3 +307,119 @@ def test_each_step_gets_its_own_model_and_effort(tmp_path: Path) -> None:
     assert argv[-1] == "-"
     assert "model_reasoning_effort=medium" in codex.argv(tmp_path, read_only=False)
     assert "--model" not in codex.argv(tmp_path, read_only=True)
+
+
+def test_claude_reports_model_effort_and_usage(tmp_path: Path) -> None:
+    reply = json.dumps(
+        {
+            "is_error": False,
+            "result": "ok",
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "cache_read_input_tokens": 9,
+                "server_tool_use": {},
+            },
+            "total_cost_usd": 0.0125,
+        }
+    )
+    result = ClaudeCli().run(
+        "x",
+        tmp_path,
+        read_only=True,
+        tuning=Tuning("claude-sonnet-5-5", "low"),
+        runner=FakeRunner(0, reply),
+        environ=HOST_ENV,
+    )
+    assert (result.harness, result.model, result.effort) == (
+        "claude-code",
+        "claude-sonnet-5-5",
+        "low",
+    )
+    assert result.usage == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "cache_read_tokens": 9,
+        "reported_cost_usd": 0.0125,
+    }
+    plain = ClaudeCli().run(
+        "x",
+        tmp_path,
+        read_only=True,
+        runner=FakeRunner(0, "not json"),
+        environ=HOST_ENV,
+    )
+    assert (plain.model, plain.usage) == (None, None)
+    bare = ClaudeCli().run(
+        "x", tmp_path, runner=FakeRunner(0, json.dumps([1])), environ=HOST_ENV
+    )
+    assert bare.usage is None
+
+
+def test_gateway_runs_report_the_gateway_model(tmp_path: Path) -> None:
+    worker = mimo_worker(SecretStr("k"))
+    result = worker.run(
+        "x",
+        tmp_path,
+        runner=FakeRunner(0, json.dumps({"result": "done"})),
+        environ=HOST_ENV,
+    )
+    assert (result.model, result.effort, result.usage) == (
+        "mimo-v2.6-flash",
+        None,
+        None,
+    )
+
+
+def test_codex_reports_the_last_turn_usage(tmp_path: Path) -> None:
+    events = "\n".join(
+        [
+            "not json",
+            json.dumps([1]),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 5}}),
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 50,
+                        "cached_input_tokens": 10,
+                        "output_tokens": 7,
+                        "reasoning_output_tokens": 3,
+                        "flag": True,
+                    },
+                }
+            ),
+        ]
+    )
+    result = CodexCli().run(
+        "x",
+        tmp_path,
+        read_only=True,
+        tuning=Tuning("gpt-6.1-sol", "medium"),
+        runner=FakeRunner(0, events),
+        environ=HOST_ENV,
+    )
+    assert (result.harness, result.model, result.effort) == (
+        "codex-cli",
+        "gpt-6.1-sol",
+        "medium",
+    )
+    assert result.usage == {
+        "input_tokens": 50,
+        "cache_read_tokens": 10,
+        "output_tokens": 7,
+        "reasoning_tokens": 3,
+    }
+
+
+def test_opencode_usage_stays_unknown(tmp_path: Path) -> None:
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    result = nvidia_worker(SecretStr("k")).run(
+        "x", worktree, runner=FakeRunner(0, "done"), environ=HOST_ENV
+    )
+    assert (result.harness, result.model, result.usage) == (
+        "opencode",
+        "z-ai/glm-5.3-flash",
+        None,
+    )

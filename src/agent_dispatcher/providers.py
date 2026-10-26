@@ -48,6 +48,10 @@ class RunResult:
     exhausted: bool
     text: str = ""
     resets_at: datetime | None = None
+    harness: str = ""
+    model: str | None = None
+    effort: str | None = None
+    usage: dict[str, int | float] | None = None
 
 
 class TermsError(RuntimeError):
@@ -117,7 +121,81 @@ def _claude_json(stdout: str) -> tuple[str, bool]:
     return str(fields.get("result", "")), bool(fields.get("is_error"))
 
 
-def _result(name: str, code: int, stdout: str, text: str, error: str) -> RunResult:
+def _numbers(
+    source: Mapping[str, object], names: Mapping[str, str]
+) -> dict[str, int | float]:
+    """Copy the numeric fields named in `names` (source -> record), skipping others."""
+    return {
+        record: value
+        for field_name, record in names.items()
+        if isinstance(value := source.get(field_name), int | float)
+        and not isinstance(value, bool)
+    }
+
+
+def _claude_usage(stdout: str) -> dict[str, int | float] | None:
+    """Return the tokens and cost Claude Code reported, or None if it reported none."""
+    try:
+        result: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(result, dict):
+        return None
+    fields = cast("dict[str, object]", result)
+    raw = fields.get("usage")
+    usage = _numbers(
+        cast("dict[str, object]", raw) if isinstance(raw, dict) else {},
+        {
+            "input_tokens": "input_tokens",
+            "output_tokens": "output_tokens",
+            "cache_read_input_tokens": "cache_read_tokens",
+            "cache_creation_input_tokens": "cache_write_tokens",
+        },
+    )
+    usage |= _numbers(fields, {"total_cost_usd": "reported_cost_usd"})
+    return usage or None
+
+
+def _codex_usage(stdout: str) -> dict[str, int | float] | None:
+    """Return the tokens from Codex's last turn that reported usage, if any."""
+    usage: dict[str, int | float] | None = None
+    for line in stdout.splitlines():
+        try:
+            event: object = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        raw = (
+            cast("dict[str, object]", event).get("usage")
+            if isinstance(event, dict)
+            else None
+        )
+        if isinstance(raw, dict):
+            usage = (
+                _numbers(
+                    cast("dict[str, object]", raw),
+                    {
+                        "input_tokens": "input_tokens",
+                        "cached_input_tokens": "cache_read_tokens",
+                        "output_tokens": "output_tokens",
+                        "reasoning_output_tokens": "reasoning_tokens",
+                    },
+                )
+                or None
+            )
+    return usage
+
+
+def _result(  # noqa: PLR0913 - every field of a result comes from the run
+    name: str,
+    code: int,
+    stdout: str,
+    text: str,
+    error: str,
+    *,
+    harness: str,
+    tuning: "Tuning | None",
+    usage: dict[str, int | float] | None,
+) -> RunResult:
     """Build a result; only a failed run can be an exhausted one."""
     failed = code != 0
     return RunResult(
@@ -127,6 +205,10 @@ def _result(name: str, code: int, stdout: str, text: str, error: str) -> RunResu
         exhausted=failed and looks_exhausted(error),
         text=text,
         resets_at=reset_time(error) if failed else None,
+        harness=harness,
+        model=tuning.model if tuning else None,
+        effort=tuning.effort or None if tuning else None,
+        usage=usage,
     )
 
 
@@ -223,7 +305,19 @@ class ClaudeCli:
         code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, is_error = _claude_json(stdout)
         code = code or int(is_error)
-        return _result(self.name, code, stdout, text, text if is_error else stderr)
+        used = tuning or (None if read_only else self.work)
+        if self.gateway is not None:
+            used = Tuning(self.gateway.model, "")
+        return _result(
+            self.name,
+            code,
+            stdout,
+            text,
+            text if is_error else stderr,
+            harness="claude-code",
+            tuning=used,
+            usage=_claude_usage(stdout),
+        )
 
 
 def _codex_events(stdout: str) -> tuple[str, str]:
@@ -296,7 +390,16 @@ class CodexCli:
         code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, errors = _codex_events(stdout)
         code = code or int(bool(errors))
-        return _result(self.name, code, stdout, text, errors or stderr)
+        return _result(
+            self.name,
+            code,
+            stdout,
+            text,
+            errors or stderr,
+            harness="codex-cli",
+            tuning=tuning or (None if read_only else self.work),
+            usage=_codex_usage(stdout),
+        )
 
 
 @dataclass(frozen=True)
@@ -366,7 +469,16 @@ class OpenCodeCli:
             "Do the task in the attached file.",
         ]
         code, stdout, stderr = runner(argv, worktree, "", env)
-        return _result(self.name, code, stdout, stdout, stderr or stdout)
+        return _result(
+            self.name,
+            code,
+            stdout,
+            stdout,
+            stderr or stdout,
+            harness="opencode",
+            tuning=Tuning(self.model, ""),
+            usage=None,
+        )
 
 
 @dataclass(frozen=True)

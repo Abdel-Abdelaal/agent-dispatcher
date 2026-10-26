@@ -79,6 +79,15 @@ read-only review by a thinker, then is pushed to that branch, and the result is
 commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is
 repaired at most once: if that doesn't fix it, a human should look.
 
+### Telemetry
+
+Every attempt (triage, plan, implement, gate, review, repair, publish, and providers
+left out of a team) is written as one bounded JSON record to
+`runs/telemetry/attempts-YYYY-MM.jsonl`. The fields are listed in
+[docs/telemetry.md](docs/telemetry.md). Prompts are only hashed, and usage is
+recorded exactly as each CLI reports it, or `null` when unknown. The platform's
+telemetry tooling signs and publishes the records; this repository never does.
+
 ### Driving it from Claude
 
 `skills/agent-dispatcher/SKILL.md` is an [Agent Skill](https://docs.claude.com/en/docs/claude-code/skills)

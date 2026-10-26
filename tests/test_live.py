@@ -24,6 +24,7 @@ from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import InvalidTransitionError, State
+from agent_dispatcher.telemetry import Telemetry
 from agent_dispatcher.workspace import GitError, Workspace
 
 ISSUE = Issue(
@@ -724,3 +725,134 @@ def test_repair_next_skips_green_or_running_prs_and_parked_teams(
         reader = FakeReader([FailedCheck("ci / Test", "42")])
         assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
     queue.close()
+
+
+def test_every_attempt_is_recorded_without_prompt_text(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models(
+        [{"docs/api.md": "# API\n"}, {"docs/api.md": "# API!\n"}], [REJECT, APPROVE]
+    )
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    run.triage_model = "mimo-v2.6-flash"
+    assert run.execute().state is State.REVIEW
+    files = list((tmp_path / "telemetry").glob("attempts-*.jsonl"))
+    text = files[0].read_text(encoding="utf-8")
+    records = [json.loads(line) for line in text.splitlines()]
+    assert [(r["stage"], r["outcome"]) for r in records] == [
+        ("triage", "proceed"),
+        ("plan", "ok"),
+        ("implement", "ok"),
+        ("gate", "passed"),
+        ("review", "rejected"),
+        ("repair", "ok"),
+        ("gate", "passed"),
+        ("review", "approved"),
+        ("publish", "ok"),
+    ]
+    assert [r["attempt"] for r in records] == list(range(1, 10))
+    assert {r["run_id"] for r in records} == {3}
+    assert records[0]["model"] == "mimo-v2.6-flash"
+    assert records[1]["level"] == "easy"
+    assert records[7]["level"] == "medium"
+    assert records[3]["files"] == ["docs/api.md"]
+    assert set(records[4]["context_sha256"]) == {"issue", "plan", "diff"}
+    assert records[8]["pr_url"] == "https://github.com/o/r/pull/9"
+    assert all(r["available_usage"] is None for r in records)
+    assert "<<<UNTRUSTED_ISSUE>>>" not in text
+    assert "You are implementing one GitHub issue" not in text
+    assert "You are reviewing a change" not in text
+
+
+def test_failures_and_quota_are_recorded(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([], [])
+    worker.exhausted = True
+    worker.code = 1
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh(), triage=None)
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.PARKED
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [(r["stage"], r["outcome"]) for r in records] == [
+        ("triage", "skipped"),
+        ("plan", "ok"),
+        ("implement", "exhausted"),
+    ]
+    assert records[2]["exhausted"] is True
+    assert records[2]["resets_at"] == "2026-10-26T00:00:00+00:00"
+
+
+def test_refusals_and_declines_are_recorded(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([{".github/workflows/ci.yml": "on: push\n"}], [])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    run.execute()
+    refusing = FakeModel("claude", ["REFUSE: no"])
+    second = tmp_path / "second"
+    second.mkdir()
+    refused = team_run(
+        second,
+        origin,
+        (refusing, FakeModel("mimo"), FakeModel("codex")),
+        FakeGh(),
+        triage='{"proceed": false, "reason": "vague"}',
+    )
+    refused.telemetry = Telemetry(tmp_path / "telemetry")
+    refused.run_id = 4
+    refused.execute()
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    gate = next(r for r in records if r["stage"] == "gate")
+    assert gate["outcome"] == "refused"
+    assert gate["gate_refusals"] == ["protected path: .github/workflows/ci.yml"]
+    assert records[-1]["stage"] == "triage"
+    assert records[-1]["outcome"] == "declined"
+
+
+def test_routing_records_name_each_left_out_provider(tmp_path: Path) -> None:
+    settings = Settings(
+        work_root=tmp_path / "runs", mimo_api_key=SecretStr("m"), nvidia_api_key=None
+    )
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    until = datetime(2026, 10, 26, tzinfo=UTC)
+    queue.park("codex", until)
+    cli.record_routing(
+        settings, queue, Team("claude", "mimo", "claude"), 5, Task("o/r", 1, "t")
+    )
+    queue.close()
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "runs" / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [(r["provider"], r["reason"]) for r in records] == [
+        ("codex", "parked"),
+        ("nvidia", "not configured"),
+    ]
+    assert records[0]["resets_at"] == until.isoformat()
+    assert all(r["stage"] == "route" and r["outcome"] == "skipped" for r in records)
+
+
+def test_triage_model_follows_the_keys() -> None:
+    assert cli.triage_model(Settings(mimo_api_key=SecretStr("m"))) == "mimo-v2.6-flash"
+    assert (
+        cli.triage_model(Settings(mimo_api_key=None, nvidia_api_key=SecretStr("n")))
+        == "z-ai/glm-5.3-flash"
+    )
+    assert cli.triage_model(Settings(mimo_api_key=None, nvidia_api_key=None)) is None

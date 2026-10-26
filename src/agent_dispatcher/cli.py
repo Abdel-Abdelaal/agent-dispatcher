@@ -31,6 +31,7 @@ from agent_dispatcher.quota import Quota
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import State, state_of
+from agent_dispatcher.telemetry import Telemetry
 from agent_dispatcher.workspace import Workspace
 
 
@@ -112,6 +113,47 @@ def triage(
     return lambda system, user: model.complete(system, user, client)
 
 
+def triage_model(settings: Settings) -> str | None:
+    """Return the model triage uses, for telemetry."""
+    if settings.mimo_api_key:
+        return mimo(settings.mimo_api_key).model
+    if settings.nvidia_api_key:
+        return nvidia(settings.nvidia_api_key).model
+    return None
+
+
+def telemetry(settings: Settings) -> Telemetry:
+    """Return the local attempt log under the work root."""
+    return Telemetry(settings.work_root.resolve() / "telemetry")
+
+
+def record_routing(
+    settings: Settings, queue: RunQueue, team: Team, run_id: int, task: Task
+) -> None:
+    """Record every provider the team left out, and why, before the run starts."""
+    parked = queue.parked_until()
+    sink = telemetry(settings)
+    for name in ("claude", "codex", "mimo", "nvidia"):
+        if name in team.members():
+            continue
+        configured_now = name in configured(settings)
+        until = parked.get(name)
+        sink.record(
+            run_id=run_id,
+            attempt=0,
+            repo=task.repo,
+            issue=task.number,
+            stage="route",
+            provider=name,
+            outcome="skipped",
+            reason="parked"
+            if until
+            else ("unused" if configured_now else "not configured"),
+            resets_at=until.isoformat() if until else None,
+            available_usage=None,
+        )
+
+
 # One CI repair per agent PR: if that doesn't fix it, a human should look.
 MAX_CI_REPAIRS = 1
 
@@ -137,6 +179,8 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         limits=Limits(settings.max_files, settings.max_lines),
         triage=triage(settings, client),
         ladder=settings.thinking_ladder,
+        telemetry=telemetry(settings),
+        triage_model=triage_model(settings),
     )
 
 
@@ -176,6 +220,7 @@ def run_live(
     root = work_root(settings)
     now = datetime.now(UTC)
     run_id = queue.start_run(task, "+".join(team.members()), now)
+    record_routing(settings, queue, team, run_id, task)
     outcome = Outcome(State.FAILED, "controller error")
     try:
         outcome = make_run(
@@ -214,6 +259,7 @@ def repair_next(
             issue = reader.issue(repo, pr.issue)
             task = Task(repo, pr.issue, issue.title)
             run_id = queue.start_run(task, "+".join(team.members()), now)
+            record_routing(settings, queue, team, run_id, task)
             outcome = Outcome(State.FAILED, "controller error")
             try:
                 run = make_run(
