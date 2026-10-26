@@ -94,9 +94,9 @@ repository also needs the `agent:*` labels before tasks can be queued there.
 ### CI repair
 
 When no task is waiting, a cycle looks at open agent PRs (branches named
-`agent/<issue>-run-<id>`). If every check has finished and one the branch's ruleset requires failed,
-the worker gets the tail of each failing required job's log (up to three jobs) for one
-repair. The fix goes through the same gate on a clean clone of the PR branch and a
+`agent/<issue>-run-<id>`). If every required check has finished and one failed, a thinker (the planner) gets
+the tail of each failing required job's log (up to three jobs) for one repair. Workers
+can't run linters, and a CI log names exact files and lines. The fix goes through the same gate on a clean clone of the PR branch and a
 read-only review by a thinker, then is pushed to that branch, and the result is
 commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is
 repaired at most once: if that doesn't fix it, a human should look.

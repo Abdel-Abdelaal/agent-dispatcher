@@ -33,6 +33,9 @@ def test_exhausted_parks_until_reset() -> None:
         "Error: 429 Too Many Requests",
         "insufficient_quota",
         "You've hit your rate limit",
+        "You've hit your limit · resets 2pm (Europe/London)",
+        "Claude AI usage limit reached|1793012400",
+        "You're out of extra usage",
     ],
 )
 def test_exhaustion_messages(output: str) -> None:
