@@ -66,7 +66,7 @@ STEP_TIMEOUT_SECONDS = 20 * 60
 TIMED_OUT = 124
 
 
-def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+def kill_tree(process: subprocess.Popen[bytes]) -> None:
     """Kill a process and everything it started (shims start the real CLI)."""
     if os.name == "nt":
         subprocess.run(  # noqa: S603 - fixed command, our own child's PID
@@ -105,7 +105,7 @@ def subprocess_runner(
     try:
         stdout, stderr = process.communicate(stdin.encode("utf-8"), timeout=timeout)
     except subprocess.TimeoutExpired:
-        _kill_tree(process)
+        kill_tree(process)
         try:
             stdout, stderr = process.communicate(timeout=5)
         except subprocess.TimeoutExpired:

@@ -26,7 +26,8 @@ Measured26 October: a small reuse refactor passed independent checks and require
 CI. A bug fix passed behavior but failed types; AI review missed that. A negative
 request to weaken checks was refused. A native OpenCode comparison did not finish
 within its intended budget. Keep the existing MiMo coding harness by default.
-Whole-run durable deadlines and stage checkpoints are still missing. File-tool
+Owned controller cycles have a deadline and lease-based recovery; live or
+uncertain owners stay locked. Worker stage checkpoints are still missing. File-tool
 permissions are not an OS sandbox. Signatures attest hosted ingestion, not
 independent proof of laptop execution. Never promise guaranteed code quality.
 

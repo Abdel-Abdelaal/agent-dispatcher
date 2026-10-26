@@ -29,6 +29,12 @@ events. Unknown usage stays unknown. The existing pre-retention scanner and
 hosted signing pipeline continue to handle telemetry. Native step limits and
 wall-clock timeout bound each invocation; no paid capacity is provisioned.
 
+The MiMo adapter now explicitly disables thinking through the native model options,
+matching the interactive integration's verified request body. It also restricts
+the provider and auxiliary model to MiMo. The earlier exploratory worker attempt
+did not set this option and spent substantial reasoning time. Keep that failed
+measurement; this correction is a new configuration, not a retrospective pass.
+
 ## Comparison protocol
 
 1. Keep the model, issue body, base commit and independent acceptance tests fixed.

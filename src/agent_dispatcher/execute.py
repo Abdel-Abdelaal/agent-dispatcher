@@ -7,6 +7,7 @@ the other thinker from the planner wherever both are available.
 """
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,7 +28,7 @@ from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
 from agent_dispatcher.states import State
-from agent_dispatcher.telemetry import Telemetry, sha256
+from agent_dispatcher.telemetry import Telemetry, redact, sha256
 from agent_dispatcher.workspace import GitError, Workspace
 
 TRIAGE = """\
@@ -133,8 +134,26 @@ class Stop(Exception):  # noqa: N818 - control flow, not an error condition
 
 def pr_title(issue: Issue) -> str:
     """Return a Conventional PR title built from the issue, never from a model."""
-    kind = "docs" if "documentation" in issue.labels else "chore"
     subject = " ".join(sanitise(issue.title).split()).rstrip(".")
+    conventional = re.fullmatch(
+        r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
+        r"(\([A-Za-z0-9_.-]+\))?(!)?: (.+)",
+        subject,
+    )
+    if conventional:
+        return subject[:_TITLE_LIMIT].rstrip()
+    kind = next(
+        (
+            kind
+            for label, kind in (
+                ("bug", "fix"),
+                ("enhancement", "feat"),
+                ("documentation", "docs"),
+            )
+            if label in issue.labels
+        ),
+        "chore",
+    )
     subject = subject[:1].lower() + subject[1:]
     return f"{kind}: {subject}"[:_TITLE_LIMIT].rstrip()
 
@@ -269,9 +288,9 @@ class Run:
     ) -> str:
         """Run one model call, record it, and stop the run if it failed or ran out.
 
-        A call that hit its turn cap below the hard level is a sign the task was
-        rated too easy: the level goes up one step and the same call continues in
-        the same clone, keeping the work so far, with the larger cap.
+        A worker may continue at a higher level in the same clone. Read-only
+        planning/review stops at its cap: restarting loses its conversation and
+        repeats the same reading rather than continuing useful file work.
         """
         while True:
             tuning = self._tuning(name) if read_only else None
@@ -284,7 +303,11 @@ class Run:
                 tuning=tuning,
                 max_turns=thinking if read_only else working,
             )
-            if result.stop_reason != "max_turns" or self.level is Level.HARD:
+            if (
+                result.stop_reason != "max_turns"
+                or self.level is Level.HARD
+                or read_only
+            ):
                 break
             self._record_call(
                 kind,
@@ -303,6 +326,8 @@ class Run:
             )
         if result.exhausted:
             outcome = "exhausted"
+        elif result.stop_reason == "max_turns":
+            outcome = "turns_exhausted"
         elif result.exit_code != 0:
             outcome = result.stop_reason or "failed"
         else:
@@ -321,13 +346,18 @@ class Run:
             raise Stop(
                 Outcome(State.PARKED, f"{name} quota exhausted", name, result.resets_at)
             )
-        if result.exit_code != 0:
-            why = _STOP_REASONS.get(result.stop_reason, "")
+        if result.exit_code != 0 or result.stop_reason == "max_turns":
+            why = (
+                " (read-only turn cap; no restart escalation)"
+                if read_only and result.stop_reason == "max_turns"
+                else _STOP_REASONS.get(result.stop_reason, "")
+            )
             raise Stop(self._failure(f"{name} failed while {stage}{why}."))
         return result.text
 
     def _failure(self, reason: str) -> Outcome:
-        return Outcome(State.FAILED, reason)
+        secrets = self.telemetry.secrets if self.telemetry else ()
+        return Outcome(State.FAILED, redact(reason, secrets)[0])
 
     def _screen(self) -> None:
         if self.triage is None:
@@ -431,6 +461,15 @@ class Run:
         patch = self.workspace.patch(agent_clone)
         if not patch.strip():
             raise Stop(self._failure("The worker made no changes."))
+        secrets = self.telemetry.secrets if self.telemetry else ()
+        if redact(patch, secrets)[1]:
+            self._record(
+                "gate",
+                "controller",
+                outcome="refused",
+                reason="Credential-like material in proposed diff.",
+            )
+            raise Stop(self._failure("Credential-like material in proposed diff."))
         url = self.remote.format(repo=self.issue.repo)
         clone = self.workspace.clone(
             url, f"run-{self.run_id}-publish-{attempt}", branch
@@ -572,15 +611,15 @@ class Run:
         )
         base = self.workspace.default_branch(clone)
         self.workspace.push(clone, branch, message)
-        notes = "\n".join(f"- {note}" for note in self.notes)
         body = (
-            f"Closes #{number}\n\n"
+            f"Draft implementation for #{number}: {title}\n\nCloses #{number}\n\n"
             f"agent-dispatcher run {self.run_id}: **{team.planner}** planned, "
             f"**{team.worker}** implemented, **{team.reviewer}** reviewed. The "
             "controller applied the worker's diff to a clean clone and gated it "
             "(protected paths, diff size, test deletions). CI runs the tests.\n\n"
-            f"{notes}\n\n<details><summary>Plan</summary>\n\n{plan.strip()}\n\n"
-            "</details>\n\n🤖 Generated by "
+            f"Plan SHA256: `{sha256(plan)}`. Model prose is retained only through "
+            "the scanned telemetry policy; it is not copied into this PR.\n\n"
+            "🤖 Generated by "
             "[agent-dispatcher](https://github.com/Abdel-Abdelaal/agent-dispatcher)\n"
         )
         pr_url = self.writer.draft_pr(repo, branch, base, title, body)

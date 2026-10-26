@@ -90,8 +90,9 @@ The front-end agent has no arbitrary shell, local file editing, deployment or
 secret-management permission. Coding is delegated to isolated worker checkouts
 rather than performed inside the controller's source tree. These are tool gates,
 not an OS sandbox. Native agent steps are capped at20 per turn. OpenCode handles
-its own context compaction and model retry behavior; it does not fix the separate
-whole-run durable-deadline gap in the dispatcher or guarantee long-task success.
+its own context compaction and model retry behavior. The team's
+[cycle supervisor](cycle-deadlines.md) separately bounds its child and recovers
+expired dead leases. Neither guarantees long-task success.
 
 The launcher isolates config, plugins and history from other apps, excludes
 project configuration and other providers, disables updates/sharing, and uses

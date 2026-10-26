@@ -51,6 +51,11 @@ def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
         assert config["plugin"] == []
         assert config["lsp"] is False
         assert config["formatter"] is False
+        assert config["enabled_providers"] == ["worker"]
+        assert config["small_model"] == "worker/mimo-v2.6-flash"
+        assert config["provider"]["worker"]["models"]["mimo-v2.6-flash"]["options"] == {
+            "thinking": {"type": "disabled"},
+        }
         assert "test-only" not in json.dumps(config)
 
 

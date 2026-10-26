@@ -74,6 +74,9 @@ class MiMoOpenCode:
             ),
         )
         config.update(
+            enabled_providers=["worker"],
+            model="worker/" + MIMO_MODEL,
+            small_model="worker/" + MIMO_MODEL,
             permission={
                 "*": "deny",
                 "read": {
@@ -94,6 +97,9 @@ class MiMoOpenCode:
             lsp=False,
             formatter=False,
         )
+        config["provider"]["worker"]["models"][MIMO_MODEL]["options"] = {
+            "thinking": {"type": "disabled"},
+        }
         # Explicitly override built-in agent defaults as well as global policy.
         # Otherwise a built-in permission (for example questions) can take precedence.
         config["agent"]["build"]["permission"] = config["permission"]

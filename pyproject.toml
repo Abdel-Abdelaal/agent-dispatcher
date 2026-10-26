@@ -5,7 +5,12 @@ description = "Serial, quota-aware dispatcher that turns owner-labelled issues i
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.28", "pydantic>=2.12", "pydantic-settings>=2.11"]
+dependencies = [
+    "httpx>=0.28",
+    "psutil==7.2.2",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.11",
+]
 
 [project.scripts]
 agent-dispatcher = "agent_dispatcher.cli:main"
@@ -19,6 +24,7 @@ dev = [
     "import-linter>=2.0",
     "deptry>=0.23",
     "vulture>=2.14",
+    "types-psutil>=7.2.2.20260906",
 ]
 
 [tool.ruff]

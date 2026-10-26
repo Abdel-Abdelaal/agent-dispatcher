@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -26,12 +27,13 @@ from agent_dispatcher.providers import (
     nvidia_worker,
     subprocess_runner,
 )
-from agent_dispatcher.publish import GitHubWriter
-from agent_dispatcher.queue import RunQueue, Task
+from agent_dispatcher.publish import GitHubWriter, PublishError
+from agent_dispatcher.queue import RunQueue, RunRecord, Task
 from agent_dispatcher.quota import Quota
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import State, state_of
+from agent_dispatcher.supervisor import cycle as supervised_cycle
 from agent_dispatcher.telemetry import (
     Telemetry,
     command_scanner,
@@ -263,7 +265,9 @@ def run_live(
     issue = reader.issue(task.repo, task.number)
     root = work_root(settings)
     now = datetime.now(UTC)
-    run_id = queue.start_run(task, "+".join(team.members()), now)
+    run_id = queue.start_run(
+        task, "+".join(team.members()), now, lease_id=settings.run_lease_id
+    )
     record_routing(settings, queue, team, run_id, task)
     outcome = Outcome(State.FAILED, "controller error")
     try:
@@ -308,7 +312,12 @@ def repair_next(
             )
             issue = reader.issue(repo, pr.issue)
             task = Task(repo, pr.issue, issue.title)
-            run_id = queue.start_run(task, "+".join(team.members()), now)
+            run_id = queue.start_run(
+                task, "+".join(team.members()), now, lease_id=settings.run_lease_id
+            )
+            repair_attempt = queue.record_repair(
+                repo, pr.number, pr.sha, "STARTED", now
+            )
             record_routing(settings, queue, team, run_id, task)
             outcome = Outcome(State.FAILED, "controller error")
             try:
@@ -323,7 +332,7 @@ def repair_next(
                 outcome = run.repair(pr, logs)
             finally:
                 finish(queue, run_id, outcome, settings, now)
-                queue.record_repair(repo, pr.number, pr.sha, outcome.state.name, now)
+                queue.finish_repair(repair_attempt, outcome.state.name, now)
             return f"repair: {repo}#{pr.number} {outcome.state} {outcome.detail}"
     return None
 
@@ -351,6 +360,38 @@ def status(queue: RunQueue, now: datetime) -> str:
     return "\n".join(lines)
 
 
+def failure_notice(settings: Settings) -> Callable[[RunRecord, str], None]:
+    """Best-effort bounded GitHub cleanup after an owned controller stops."""
+
+    def notify(record: RunRecord, outcome: str) -> None:
+        token = (
+            settings.github_token.get_secret_value() if settings.github_token else None
+        )
+        writer = GitHubWriter(
+            partial(subprocess_runner, timeout=15), os.environ, Path.cwd()
+        )
+        try:
+            with httpx.Client() as client:
+                issue = GitHubReader(client, token).issue(record.repo, record.number)
+            state = state_of(issue.labels)
+            if state is State.READY:
+                state = writer.move(record.repo, record.number, state, State.RUNNING)
+            if state is not None and state in {State.RUNNING, State.PARKED}:
+                writer.move(record.repo, record.number, state, State.FAILED)
+            writer.comment(
+                record.repo,
+                record.number,
+                f"Controller cycle stopped: {outcome}. Run{record.id} was retained; "
+                "no automatic retry. Check any existing draft PR independently.",
+            )
+        except (httpx.HTTPError, PublishError, ValueError):
+            sys.stderr.write(
+                "Cycle stopped locally; GitHub notice failed. Inspect issue state.\n"
+            )
+
+    return notify
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one cycle: plan, then (unless --dry-run) execute the next task."""
     parser = argparse.ArgumentParser(prog="agent-dispatcher")
@@ -358,8 +399,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     once = commands.add_parser("once", help="run one poll cycle")
     once.add_argument("--dry-run", action="store_true", help="plan without running")
     commands.add_parser("status", help="show waiting tasks, parked models, runs")
+    commands.add_parser(
+        "supervise", help="run one cycle with an owned process deadline"
+    )
     arguments = parser.parse_args(argv)
     settings = Settings()
+    if arguments.command == "supervise":
+        return supervised_cycle(settings, telemetry(settings), failure_notice(settings))
     if arguments.command == "status":
         queue = RunQueue(settings.db_path)
         try:
