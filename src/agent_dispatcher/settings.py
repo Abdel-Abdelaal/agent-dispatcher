@@ -65,4 +65,6 @@ class Settings(BaseSettings):
     codex_work_model: str = "gpt-6.1-sol"
     codex_work_effort: CodexEffort = "medium"
     mimo_api_key: SecretStr | None = None
+    mimo_harness: Literal["claude-code", "opencode"] = "claude-code"
+    opencode_executable: str = "opencode"
     nvidia_api_key: SecretStr | None = None

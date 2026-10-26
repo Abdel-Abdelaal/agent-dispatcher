@@ -14,6 +14,7 @@ from agent_dispatcher.execute import Outcome, Provider, Run
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import GitHubReader
 from agent_dispatcher.intake import Issue
+from agent_dispatcher.opencode_worker import MiMoOpenCode
 from agent_dispatcher.providers import (
     ChatApi,
     ClaudeCli,
@@ -109,7 +110,11 @@ def providers(settings: Settings) -> dict[str, Provider]:
         ),
     }
     if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
-        adapters["mimo"] = mimo_worker(settings.mimo_api_key)
+        adapters["mimo"] = (
+            MiMoOpenCode(settings.mimo_api_key, settings.opencode_executable)
+            if settings.mimo_harness == "opencode"
+            else mimo_worker(settings.mimo_api_key)
+        )
     if settings.nvidia_api_key:
         adapters["nvidia"] = nvidia_worker(settings.nvidia_api_key)
     return {
