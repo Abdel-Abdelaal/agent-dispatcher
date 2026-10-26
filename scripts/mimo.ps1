@@ -1,13 +1,20 @@
 # Installed as the laptop's `mimo` command. No credentials are displayed.
 [CmdletBinding()]
 param(
-    [ValidateSet('task', 'start', 'status', 'logs')]
-    [string]$Mode = 'task'
+    [ValidateSet('chat', 'task', 'start', 'status', 'logs')]
+    [string]$Mode = 'chat'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repo '.venv\Scripts\agent-dispatcher.exe'
+if ($Mode -eq 'chat') {
+    Push-Location $repo
+    try {
+        & (Join-Path $repo '.venv\Scripts\python.exe') -m agent_dispatcher.assistant
+    } finally { Pop-Location }
+    return
+}
 Write-Output 'MiMo orchestrator: task -> plan -> code -> review -> gated draft PR.'
 if ($Mode -eq 'logs') {
     Get-Content -LiteralPath (Join-Path $repo 'runs\dispatcher.log') -Tail 30 -Wait

@@ -582,6 +582,28 @@ class ChatApi:
         response.raise_for_status()
         return str(response.json()["choices"][0]["message"]["content"])
 
+    def exchange(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        client: httpx.Client,
+    ) -> dict[str, object]:
+        """Return one tool-capable message without automatic network retries."""
+        response = client.post(
+            f"{self.base_url}/chat/completions",
+            json={
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "max_completion_tokens": 2048,
+                **(self.extra_body or {}),
+            },
+            headers={"Authorization": f"Bearer {self.api_key.get_secret_value()}"},
+            timeout=90,
+        )
+        response.raise_for_status()
+        return cast("dict[str, object]", response.json())
+
 
 MIMO_OPENAI = "https://token-plan-ams.xiaomimimo.com/v1"
 MIMO_ANTHROPIC = "https://token-plan-ams.xiaomimimo.com/anthropic"

@@ -40,21 +40,48 @@ availability. A signed suggestion can be wrong; the agent may decline it.
 
 ## Start, inspect or pause
 
-On Abdel's configured laptop, open a terminal and run `mimo`. It asks for the
-public repository name, goal and acceptance criteria, creates an owner-authorized
-public `agent:ready` issue, then starts the orchestrator. It does not open a direct
-model chat. Never put secrets in these public task prompts.
+On Abdel's configured laptop, run `mimo` and describe what you want normally:
 
-This saves
-MiMo-only planning, coding and review for future cycles, then requests a cycle
-through the existing scheduler, including audit intake and telemetry delivery.
-It processes the next `agent:ready` issue in queue order. Use `mimo start` to run
-already queued work without creating an issue. It does not reopen a failed task.
-Use `mimo status` for the queue and recent runs, or `mimo logs` to
-watch the controller log. Ctrl+C stops watching without cancelling the run.
-An active run or paused schedule is left alone. This does not buy capacity.
-An exhausted MiMo allowance still prevents execution until availability returns.
-The installed command points to `scripts/mimo.ps1` in the protected main checkout.
+> I'm not sure which repo needs attention. Look at my projects and suggest a task.
+>
+> Fix duplicate aliases in shortlink, add a regression test and open a draft PR.
+>
+> Create a private repo called garden-notes for a gardening project.
+
+The conversational assistant can discover public projects, inspect files, issues
+and PR checks, search GitHub projects, create an owned repo and queue code work.
+GitHub authentication stays in controller tools, never in model messages. GitHub
+writes show the exact action and require a terminal `y`. Repo creation defaults
+to private. Autonomous private coding is not enabled; new public repos still need
+fleet enrollment before their workflows can be assumed present.
+
+The chat loads [shared project context](assistant-context.md) and any notes you
+explicitly ask it to remember and approve. It does not inherit other assistants'
+chat histories or every tool they have. Conversation history is in memory only;
+restarting retains the shared brief and approved local notes. Chat telemetry is
+hashes/sizes/outcomes/known usage, kept locally in `runs/assistant-telemetry`, not
+yet included in public dashboard ingestion. No raw chat transcript is retained.
+
+Use `/status`, `/reset` and `/quit` in chat. Shell commands `mimo status` and
+`mimo logs` remain available without a model call. `mimo start` requests a cycle
+for already queued work and saves MiMo-only planning, coding and review for future
+cycles. `mimo task` retains the optional explicit task form. The scheduler handles
+audit intake and telemetry delivery; queued issues run serially, not necessarily
+immediately. Active or paused runs are not overridden. No failed task is reopened
+automatically. MiMo quota still applies, with no paid fallback or automatic retries.
+
+The chat allows at most six model exchanges per user turn, four tool calls per
+exchange, a context character budget,90-second model request timeouts and45-second
+controller command timeouts. A five-minute elapsed guard is checked between calls;
+it is not an exact whole-process deadline and waits for terminal approval are not
+bounded. It does not fix the dispatcher's separate durable-deadline limitation.
+There is no arbitrary shell, deployment or secret-management tool. A tool failure
+is evidence of a failed operation, never approval to bypass policy or buy capacity.
+
+The existing installed shortcut points to `scripts/mimo.ps1` in protected main.
+The chat reuses the configured MiMo API adapter, structured subprocess runner,
+typed tool validation and existing gated coding pipeline, with no new dependency.
+Its tool protocol follows [MiMo's API documentation](https://mimo.mi.com/docs/api/text-generation/openai-api).
 
 These PowerShell commands use the installed controller. They do not print keys.
 
