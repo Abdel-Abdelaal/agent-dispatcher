@@ -98,7 +98,10 @@ class MiMoOpenCode:
             lsp=False,
             formatter=False,
         )
-        config["provider"]["worker"]["models"][MIMO_MODEL]["options"] = {
+        model = config["provider"]["worker"]["models"][MIMO_MODEL]
+        model["reasoning"] = True
+        model["interleaved"] = {"field": "reasoning_content"}
+        model["options"] = {
             "thinking": {"type": self.reasoning},
         }
         # Explicitly override built-in agent defaults as well as global policy.
