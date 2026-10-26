@@ -48,40 +48,68 @@ On Abdel's configured laptop, run `mimo` and describe what you want normally:
 >
 > Create a private repo called garden-notes for a gardening project.
 
-The conversational assistant can discover public projects, inspect files, issues
-and PR checks, search GitHub projects, create an owned repo and queue code work.
-GitHub authentication stays in controller tools, never in model messages. GitHub
-writes show the exact action and require a terminal `y`. Repo creation defaults
-to private. Autonomous private coding is not enabled; new public repos still need
-fleet enrollment before their workflows can be assumed present.
+`mimo` opens the real, pinned OpenCode1.18.35 terminal interface with the
+`trifecta` primary agent and MiMo v2.6 Flash. The custom Python chat loop has been
+removed. MiMo is the only enabled provider in this UI. No CLI upgrade, new service,
+paid fallback or new project dependency is introduced.
 
-The chat loads [shared project context](assistant-context.md) and any notes you
-explicitly ask it to remember and approve. It does not inherit other assistants'
-chat histories or every tool they have. Conversation history is in memory only;
-restarting retains the shared brief and approved local notes. Chat telemetry is
-hashes/sizes/outcomes/known usage, kept locally in `runs/assistant-telemetry`, not
-yet included in public dashboard ingestion. No raw chat transcript is retained.
+The connected `trifecta_*` MCP tools discover public projects, inspect files,
+issues and PR checks, search GitHub projects, create an owned repo and queue code
+work. OpenCode's native permission UI asks before `create_repo`, `queue_task`,
+`start` and `remember`. The controller still verifies owner identity and repository
+policy. No GitHub token is placed in model messages or provider configuration.
+The MCP transport is local stdio, not a network service. A read-only connection
+refuses writes even if a client requests one. Completed and failed write requests
+are deduplicated during the bridge process lifetime; this is not cross-restart
+idempotency. Do not blindly retry a write after an ambiguous network error.
 
-Use `/status`, `/reset` and `/quit` in chat. Shell commands `mimo status` and
-`mimo logs` remain available without a model call. `mimo start` requests a cycle
-for already queued work and saves MiMo-only planning, coding and review for future
-cycles. `mimo task` retains the optional explicit task form. The scheduler handles
-audit intake and telemetry delivery; queued issues run serially, not necessarily
-immediately. Active or paused runs are not overridden. No failed task is reopened
-automatically. MiMo quota still applies, with no paid fallback or automatic retries.
+Long coding work is real background work: the assistant queues an issue and starts
+the existing scheduler, then uses status and PR checks to report actual progress.
+The separate planner, worker and reviewer retain the same gates. With MiMo-only
+fallback, those roles use separate MiMo calls, not three independent providers.
+Repo creation defaults to private. Private autonomous coding remains unavailable;
+new public repos still need fleet enrollment/checks before coverage is assumed.
 
-The chat allows at most six model exchanges per user turn, four tool calls per
-exchange, a context character budget,90-second model request timeouts and45-second
-controller command timeouts. A five-minute elapsed guard is checked between calls;
-it is not an exact whole-process deadline and waits for terminal approval are not
-bounded. It does not fix the dispatcher's separate durable-deadline limitation.
-There is no arbitrary shell, deployment or secret-management tool. A tool failure
-is evidence of a failed operation, never approval to bypass policy or buy capacity.
+The native UI loads [shared project context](assistant-context.md) and approved
+notes. It does not inherit other assistants' full histories or every tool. Native
+sessions, prompts, tool outputs and usage persist locally under
+`runs/native-opencode` and are resumed on the next launch with `--continue`.
+Sharing is disabled. These confidential native session records are not published
+or currently ingested into the public dashboard. The controller bridge also keeps
+hashes/outcomes locally in `runs/assistant-telemetry`. This replaces the old
+in-memory-only chat behavior; do not publish the native session directory.
 
-The existing installed shortcut points to `scripts/mimo.ps1` in protected main.
-The chat reuses the configured MiMo API adapter, structured subprocess runner,
-typed tool validation and existing gated coding pipeline, with no new dependency.
-Its tool protocol follows [MiMo's API documentation](https://mimo.mi.com/docs/api/text-generation/openai-api).
+OpenCode supplies its normal conversation, session and permission interface.
+Shell commands `mimo status` and `mimo logs` still work without a model call.
+`mimo start` starts already queued work and saves MiMo-only mode for future cycles.
+`mimo task` keeps the optional explicit form. Closing the UI does not stop an
+already-started background dispatcher run. Requests run serially and may wait.
+
+The front-end agent has no arbitrary shell, local file editing, deployment or
+secret-management permission. Coding is delegated to isolated worker checkouts
+rather than performed inside the controller's source tree. These are tool gates,
+not an OS sandbox. Native agent steps are capped at20 per turn. OpenCode handles
+its own context compaction and model retry behavior; it does not fix the separate
+whole-run durable-deadline gap in the dispatcher or guarantee long-task success.
+
+The launcher isolates config, plugins and history from other apps, excludes
+project configuration and other providers, disables updates/sharing, and uses
+explicit agent and global tool permissions. It never passes `--auto`. Approval
+is enforced by the reviewed native host; running the bridge independently with
+its native-write flag is outside that trusted host path. Owner choices such as
+remembered native approvals remain under the owner's control.
+
+## Native integration references
+
+This integration reuses the existing controller broker and worker pipeline. It
+adds a small stdio MCP bridge, not another chat/model loop. OpenCode remains the
+already pinned MIT-licensed upstream CLI; no upstream implementation was copied.
+The exact1.18.35 MCP naming and permission/configuration schema were inspected.
+
+- [OpenCode MCP integration](https://opencode.ai/docs/mcp-servers/)
+- [OpenCode permissions](https://opencode.ai/docs/permissions/)
+- [Pinned MCP client source](https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/mcp/index.ts)
+- [Pinned tool naming](https://github.com/anomalyco/opencode/blob/v1.18.35/packages/opencode/src/mcp/catalog.ts)
 
 These PowerShell commands use the installed controller. They do not print keys.
 

@@ -50,28 +50,6 @@ class Request(BaseModel):
     visibility: Literal["private", "public"] = "private"
 
 
-def tool_definition() -> list[dict[str, object]]:
-    """Describe tools using the same schema used to validate their arguments."""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "orchestrator",
-                "description": (
-                    "Discover public repos, inspect files/issues/PR checks, search "
-                    "GitHub projects, show status. queue_task publishes title/text "
-                    "as a public ready issue. create_repo uses text as description "
-                    "(private by default). start requests the MiMo-only scheduler. "
-                    "remember saves a local note. Writes need terminal approval. "
-                    "Use repo name or owner/name; read_file uses path; "
-                    "inspect_pr uses number."
-                ),
-                "parameters": Request.model_json_schema(),
-            },
-        }
-    ]
-
-
 @dataclass
 class ControllerTools:
     """Keep authenticated GitHub operations in the controller, never the model."""
