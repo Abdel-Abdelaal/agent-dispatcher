@@ -94,6 +94,9 @@ class MiMoOpenCode:
             lsp=False,
             formatter=False,
         )
+        # Explicitly override built-in agent defaults as well as global policy.
+        # Otherwise a built-in permission (for example questions) can take precedence.
+        config["agent"]["build"]["permission"] = config["permission"]
         return json.dumps(config)
 
     def run(  # noqa: PLR0913 - matches the controller's provider protocol
