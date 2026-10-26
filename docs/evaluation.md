@@ -51,17 +51,17 @@ configuration reasons, not code:
 ## What went wrong, and what changed
 
 1. **CI repair chased the advisory lint failures.** It spent over 20 minutes on E2 trying
-   to fix a lint configuration problem that the gate correctly stops agents from touching.
-   **Fix (#13):** repair acts only on checks the branch's ruleset requires.
+    to fix a lint configuration problem that the gate correctly stops agents from touching.
+    **Fix (#13):** repair acts only on checks the branch's ruleset requires.
 2. **No time limit per model call.** A stuck worker could hold the single-run queue for an
-   hour. **Fix (#13):** 20 minutes per call, with the whole process tree killed on timeout.
+    hour. **Fix (#13):** 20 minutes per call, with the whole process tree killed on timeout.
 3. **A failed `gh` call crashed the controller,** leaving a task at `agent:running`.
-   **Fix (#13):** any unexpected error ends the task in `agent:failed` with a comment.
+    **Fix (#13):** any unexpected error ends the task in `agent:failed` with a comment.
 4. **Triage rated every real task "easy",** including writing a new test file, and every
-   review approved on the first round. So the thinkers ran on the cheapest setting
-   (Sonnet 5.5 or gpt-6.1-sol, low effort) throughout, and still produced six correct PRs.
-   Conserving quota works, but the planner re-rating and the escalation to Opus or
-   GPT-6-Astra haven't been exercised live yet.
+    review approved on the first round. So the thinkers ran on the cheapest setting
+    (Sonnet 5.5 or gpt-6.1-sol, low effort) throughout, and still produced six correct PRs.
+    Conserving quota works, but the planner re-rating and the escalation to Opus or
+    GPT-6-Astra haven't been exercised live yet.
 
 ## Still to prove live
 
