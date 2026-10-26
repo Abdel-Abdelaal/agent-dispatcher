@@ -18,6 +18,8 @@ LIMITS = Limits(max_files=3, max_lines=50)
         ".github/workflows/ci.yml",
         ".GitHub\\workflows\\ci.yml",
         ".claude/settings.json",
+        ".opencode/plugins/untrusted.ts",
+        "nested/.OpenCode/agents/override.md",
         "pkg/.mcp.json",
         "docs/AGENTS.md",
         "CLAUDE.md",
