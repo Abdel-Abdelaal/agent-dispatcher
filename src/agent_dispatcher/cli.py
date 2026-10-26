@@ -232,14 +232,45 @@ def repair_next(
     return None
 
 
+def status(queue: RunQueue, now: datetime) -> str:
+    """Return the local state: waiting tasks, parked providers and recent runs."""
+    waiting = queue.waiting()
+    lines = [f"waiting: {len(waiting)}"]
+    lines += [f"  {task.repo}#{task.number} {task.title}" for task in waiting]
+    parked = {
+        name: until for name, until in queue.parked_until().items() if until > now
+    }
+    lines.append(f"parked: {len(parked)}")
+    lines += [
+        f"  {name} until {until.isoformat(timespec='minutes')}"
+        for name, until in sorted(parked.items())
+    ]
+    runs = queue.recent_runs()
+    lines.append(f"recent runs: {len(runs)}")
+    lines += [
+        f"  run {run.id} {run.repo}#{run.number} [{run.team}] "
+        f"{run.outcome or 'running'} {run.started_at[:16]}"
+        for run in runs
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one cycle: plan, then (unless --dry-run) execute the next task."""
     parser = argparse.ArgumentParser(prog="agent-dispatcher")
     commands = parser.add_subparsers(dest="command", required=True)
     once = commands.add_parser("once", help="run one poll cycle")
     once.add_argument("--dry-run", action="store_true", help="plan without running")
+    commands.add_parser("status", help="show waiting tasks, parked models, runs")
     arguments = parser.parse_args(argv)
     settings = Settings()
+    if arguments.command == "status":
+        queue = RunQueue(settings.db_path)
+        try:
+            sys.stdout.write(status(queue, datetime.now(UTC)) + "\n")
+        finally:
+            queue.close()
+        return 0
     token = settings.github_token.get_secret_value() if settings.github_token else None
     queue = RunQueue(settings.db_path)
     try:
