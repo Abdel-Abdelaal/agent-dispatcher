@@ -21,11 +21,16 @@ class Plan:
 
 
 def choose_team(
-    quotas: Mapping[str, Quota], max_share: float, now: datetime
+    quotas: Mapping[str, Quota],
+    max_share: float,
+    now: datetime,
+    *,
+    allow_worker_thinking: bool = False,
 ) -> Team | None:
     """Return the team for the next run; providers missing from `quotas` are off."""
     return form_team(
-        lambda name: name in quotas and allows(quotas[name], max_share, now)
+        lambda name: name in quotas and allows(quotas[name], max_share, now),
+        allow_worker_thinking=allow_worker_thinking,
     )
 
 
@@ -38,6 +43,7 @@ class Cycle:
     read_issues: Callable[[str], list[Issue]]
     queue: RunQueue
     max_share: float
+    allow_worker_thinking: bool = False
 
     def plan(self, quotas: Mapping[str, Quota], now: datetime) -> Plan:
         """Poll every repo, queue owner-labelled issues, and pick the next run."""
@@ -50,5 +56,14 @@ class Cycle:
                 elif self.queue.enqueue(issue, now):
                     queued.append(issue)
         task = self.queue.next_task()
-        team = choose_team(quotas, self.max_share, now) if task else None
+        team = (
+            choose_team(
+                quotas,
+                self.max_share,
+                now,
+                allow_worker_thinking=self.allow_worker_thinking,
+            )
+            if task
+            else None
+        )
         return Plan(queued, ignored, task, team)

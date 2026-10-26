@@ -27,13 +27,17 @@ class Team:
         return tuple(dict.fromkeys((self.planner, self.worker, self.reviewer)))
 
 
-def form_team(available: Callable[[str], bool]) -> Team | None:
+def form_team(
+    available: Callable[[str], bool], *, allow_worker_thinking: bool = False
+) -> Team | None:
     """Return the best team from available providers, or None to park the task.
 
     Without a thinker nobody can plan or review, so the task waits. Without a
     worker, a thinker implements as a last resort rather than leaving work idle.
     """
     thinkers = [name for name in THINKERS if available(name)]
+    if not thinkers and allow_worker_thinking:
+        thinkers = [name for name in WORKERS if available(name)]
     if not thinkers:
         return None
     workers = [name for name in WORKERS if available(name)] or thinkers

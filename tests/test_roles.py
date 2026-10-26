@@ -33,3 +33,16 @@ def test_a_thinker_implements_when_no_worker_is_left() -> None:
 
 def test_no_thinker_parks_the_task() -> None:
     assert form_team(available("mimo", "nvidia")) is None
+
+
+def test_owner_enabled_mimo_only_fallback() -> None:
+    assert form_team(available("mimo"), allow_worker_thinking=True) == Team(
+        "mimo", "mimo", "mimo"
+    )
+    assert form_team(available(), allow_worker_thinking=True) is None
+
+
+def test_fallback_still_prefers_available_thinker() -> None:
+    assert form_team(available("codex", "mimo"), allow_worker_thinking=True) == Team(
+        "codex", "mimo", "codex"
+    )

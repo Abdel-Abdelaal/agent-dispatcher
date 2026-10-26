@@ -1,5 +1,21 @@
 # agent-dispatcher
 
+## Provider fallback
+
+The host can exclude an exhausted provider with
+`DISPATCHER_DISABLED_PROVIDERS=claude`. Codex then plans and reviews while MiMo
+implements. If Codex is also parked, the owner can enable
+`DISPATCHER_ALLOW_WORKER_THINKING=true`: MiMo performs separate planning,
+implementation and read-only review calls. This is same-provider review with
+less independence, not a cross-provider quality guarantee. The telemetry records
+the actual provider for every stage. Protected paths, diff limits, tests, turn
+caps and draft-only publication still apply. No fallback purchases capacity.
+When all configured providers are unavailable, the task waits for quota reset.
+
+MiMo uses Claude Code as a local harness with the configured MiMo gateway; this
+does not select the Claude subscription provider. The two providers have separate
+quota identities in the controller.
+
 A serial, quota-aware dispatcher that turns issues Abdel labels into gated draft
 PRs, using the official Claude Code and Codex CLIs within their terms.
 

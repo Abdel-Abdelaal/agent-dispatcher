@@ -279,7 +279,12 @@ def repair_next(
     """Repair the first agent PR whose blocking checks failed, once per PR."""
     now = datetime.now(UTC)
     known = quotas(configured(settings), queue.parked_until())
-    team = choose_team(known, settings.max_weekly_share, now)
+    team = choose_team(
+        known,
+        settings.max_weekly_share,
+        now,
+        allow_worker_thinking=settings.allow_worker_thinking,
+    )
     if team is None:
         return None
     for repo in target_repos(settings, reader):
@@ -368,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 read_issues=reader.ready_issues,
                 queue=queue,
                 max_share=settings.max_weekly_share,
+                allow_worker_thinking=settings.allow_worker_thinking,
             )
             known = quotas(configured(settings), queue.parked_until())
             plan = cycle.plan(known, datetime.now(UTC))
