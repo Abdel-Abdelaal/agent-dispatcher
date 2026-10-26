@@ -218,12 +218,44 @@ def test_native_launcher_starts_real_interface_without_auto_permissions(
     monkeypatch.setattr(native_ui, "load_settings", Mock(return_value=settings))
     launch = Mock(return_value=0)
     monkeypatch.setattr(native_ui.subprocess, "call", launch)
+    monkeypatch.setattr(
+        native_ui, "resume_args", Mock(return_value=["--session", "ses_saved"])
+    )
     assert native_ui.main() == 0
     argv = launch.call_args.args[0]
-    assert "--continue" in argv
+    assert "--session" in argv
     assert "--pure" in argv
     assert "--auto" not in argv
     assert "key" not in argv
+
+
+@pytest.mark.parametrize(
+    "output", ["[]", "bad-json", "{}", '[{"id":"dummy"}]', "[null]"]
+)
+def test_first_launch_does_not_resume_invalid_or_absent_session(
+    tmp_path: Path,
+    output: str,
+) -> None:
+    assert (
+        native_ui.resume_args(
+            "opencode", tmp_path, {}, Mock(return_value=(0, output, ""))
+        )
+        == []
+    )
+
+
+def test_resume_uses_valid_saved_session_and_handles_failed_listing(
+    tmp_path: Path,
+) -> None:
+    assert native_ui.resume_args(
+        "opencode", tmp_path, {}, Mock(return_value=(0, '[{"id":"ses_saved123"}]', ""))
+    ) == ["--session", "ses_saved123"]
+    assert (
+        native_ui.resume_args(
+            "opencode", tmp_path, {}, Mock(return_value=(1, "", "error"))
+        )
+        == []
+    )
 
 
 def test_mcp_main_routes_only_protocol_through_stdio(

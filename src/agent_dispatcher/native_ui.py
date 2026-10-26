@@ -2,15 +2,25 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_dispatcher.assistant_context import context
 from agent_dispatcher.fleet_mcp import WRITES
-from agent_dispatcher.providers import MIMO_MODEL, MIMO_OPENAI, scrubbed_env
+from agent_dispatcher.providers import (
+    MIMO_MODEL,
+    MIMO_OPENAI,
+    Runner,
+    scrubbed_env,
+    subprocess_runner,
+)
 from agent_dispatcher.settings import Settings, load_settings
+
+_SESSION_RUNNER: Runner = partial(subprocess_runner, timeout=15)
 
 PROMPT = """You are Abdel's fleet orchestrator in the native OpenCode interface.
 You HAVE connected trifecta_* tools. Use them. Do not claim you are a text-only
@@ -127,6 +137,38 @@ def environment(root: Path, settings: Settings) -> dict[str, str]:
     return env
 
 
+def resume_args(
+    executable: str,
+    workspace: Path,
+    env: dict[str, str],
+    runner: Runner = _SESSION_RUNNER,
+) -> list[str]:
+    """Resume a real saved session; an empty profile must open a clean home screen."""
+    code, output, _error = runner(
+        [executable, "session", "list", "--format", "json", "--max-count", "1"],
+        workspace,
+        "",
+        env,
+    )
+    if code:
+        return []
+    try:
+        rows = json.loads(output)
+        row = cast("dict[str, Any]", rows[0]) if isinstance(rows, list) and rows else {}
+        value = row.get("id")
+    except (ValueError, AttributeError):
+        return []
+    return (
+        ["--session", value]
+        if isinstance(value, str)
+        and re.fullmatch(
+            r"ses_[A-Za-z0-9]+",
+            value,
+        )
+        else []
+    )
+
+
 def main() -> int:
     """Open the real TUI, resuming local sessions without a custom chat loop."""
     root = Path(__file__).resolve().parents[2]
@@ -140,6 +182,7 @@ def main() -> int:
         return 1
     workspace = root / "runs" / "native-opencode" / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
+    env = environment(root, settings)
     argv = [
         str(executable),
         str(workspace),
@@ -147,11 +190,11 @@ def main() -> int:
         "trifecta",
         "--model",
         "worker/" + MIMO_MODEL,
-        "--continue",
+        *resume_args(str(executable), workspace, env),
         "--pure",
     ]
     # Interactive UI owns its permission prompts; no --auto, shell or token argv.
-    return subprocess.call(argv, env=environment(root, settings))  # noqa: S603
+    return subprocess.call(argv, env=env)  # noqa: S603
 
 
 if __name__ == "__main__":
