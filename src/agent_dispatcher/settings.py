@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # A trusted CLI (stdin to stdout) that scans excerpts before they're kept.
     # Without it, telemetry keeps only each output's hash and length.
     output_scanner: Path | None = None
+    # Experiment: let easy documentation tasks go straight to the worker. The
+    # review still checks the change. Compare telemetry before keeping it on.
+    skip_plan_for_easy_docs: bool = False
     # Thinking (plan, review) follows the task's level: see levels.DEFAULT_LADDER.
     # Override with JSON, e.g. {"claude": {"hard": ["claude-opus-5-5", "max"]}}.
     thinking_ladder: dict[str, dict[str, tuple[str, str]]] = Field(

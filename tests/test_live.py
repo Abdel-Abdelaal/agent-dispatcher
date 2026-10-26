@@ -78,6 +78,7 @@ class FakeModel:
         self.edits = edits or []
         self.prompts: list[tuple[str, bool]] = []
         self.tunings: list[Tuning | None] = []
+        self.turns: list[int | None] = []
         self.code = 0
         self.exhausted = False
 
@@ -92,9 +93,11 @@ class FakeModel:
         *,
         read_only: bool = False,
         tuning: Tuning | None = None,
+        max_turns: int | None = None,
     ) -> RunResult:
         self.prompts.append((prompt, read_only))
         self.tunings.append(tuning)
+        self.turns.append(max_turns)
         if not read_only and self.edits:
             for path, text in self.edits.pop(0).items():
                 target = worktree / path
@@ -924,8 +927,9 @@ class Crashing(FakeModel):
         *,
         read_only: bool = False,
         tuning: Tuning | None = None,
+        max_turns: int | None = None,
     ) -> RunResult:
-        del prompt, worktree, read_only, tuning
+        del prompt, worktree, read_only, tuning, max_turns
         message = "boom"
         raise RuntimeError(message)
 
@@ -963,3 +967,50 @@ def test_an_unexpected_error_still_ends_in_a_final_state(
         State.FAILED, "Controller error: RuntimeError."
     )
     assert any(argv[1:3] == ["pr", "comment"] for argv, _ in gh2.calls)
+
+
+def test_turn_caps_follow_the_level(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([{"a.md": "x\n"}], [APPROVE])
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    assert run.execute().state is State.REVIEW
+    assert (planner.turns, worker.turns, reviewer.turns) == ([10], [15], [10])
+
+
+def test_easy_docs_can_skip_the_planner(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([{"a.md": "x\n"}], [APPROVE])
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    run.skip_easy_docs_plan = True
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.REVIEW
+    assert planner.prompts == []
+    assert "No separate plan" in worker.prompts[0][0]
+    assert "Plan: skipped for an easy documentation task." in run.notes
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert ("plan", "skipped") in [(r["stage"], r["outcome"]) for r in records]
+
+
+def test_skipping_the_plan_needs_easy_and_documentation(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([{"a.md": "x\n"}], [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.skip_easy_docs_plan = True
+    assert run.execute().state is State.REVIEW
+    assert len(planner.prompts) == 1

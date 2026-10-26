@@ -37,6 +37,13 @@ DEFAULT_LADDER: dict[str, dict[str, tuple[str, str]]] = {
         "hard": ("gpt-6-astra", "high"),
     },
 }
+# Agent turns allowed per level, as (thinking, working). Easy tasks can't wander;
+# hard ones keep room to explore. Only Claude Code's harness enforces a turn cap.
+TURNS: dict[str, tuple[int, int]] = {
+    "easy": (10, 15),
+    "medium": (15, 25),
+    "hard": (25, 40),
+}
 _RATING = re.compile(r"^\s*DIFFICULTY:\s*(easy|medium|hard)\b", re.IGNORECASE)
 
 
