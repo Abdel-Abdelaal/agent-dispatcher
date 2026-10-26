@@ -237,14 +237,14 @@ def test_a_rejected_change_gets_one_repair_round(tmp_path: Path, origin: Path) -
 
 def test_two_rejections_fail_with_the_findings(tmp_path: Path, origin: Path) -> None:
     planner, worker, reviewer = models(
-        [{"docs/api.md": "x\n"}, {"docs/api.md": "y\n"}], [REJECT, "not json"]
+        [{"docs/api.md": "x\n"}, {"docs/api.md": "y\n"}], [REJECT, REJECT]
     )
     gh = FakeGh()
     outcome = team_run(tmp_path, origin, (planner, worker, reviewer), gh).execute()
     assert outcome.state is State.FAILED
     assert "did not approve after 2 rounds" in outcome.detail
     assert gh.labels()[-1] == ("agent:running", "agent:failed")
-    assert "Reply in the JSON format." in gh.comments()[0]
+    assert "typo" in gh.comments()[0]
 
 
 def test_protected_paths_are_refused_and_explained(
@@ -371,6 +371,31 @@ def test_json_reply_finds_the_object_or_nothing() -> None:
     assert json_reply("{broken") is None
     assert json_reply("{not json}") is None
     assert json_reply("[{}]") == {}
+
+
+def test_review_format_retry_is_read_only_not_a_code_repair(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "x\n"}], ["bad", APPROVE])
+    gh = FakeGh()
+    result = team_run(tmp_path, origin, (planner, worker, reviewer), gh).execute()
+    assert result.state is State.REVIEW
+    assert len(worker.prompts) == 1
+    assert len(reviewer.prompts) == 2
+    assert all(read_only for _, read_only in reviewer.prompts)
+    assert "exactly one valid JSON" in reviewer.prompts[1][0]
+
+
+def test_two_invalid_review_verdicts_fail_without_publication(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "x\n"}], ["bad", "bad"])
+    gh = FakeGh()
+    result = team_run(tmp_path, origin, (planner, worker, reviewer), gh).execute()
+    assert result == Outcome(State.FAILED, "The reviewer returned invalid JSON twice.")
+    assert len(worker.prompts) == 1
+    assert len(reviewer.prompts) == 2
+    assert not any(argv[1:3] == ["pr", "create"] for argv, _ in gh.calls)
 
 
 def test_run_live_records_and_parks_the_named_provider(
