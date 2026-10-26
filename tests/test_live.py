@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1014,3 +1015,79 @@ def test_skipping_the_plan_needs_easy_and_documentation(
     run.skip_easy_docs_plan = True
     assert run.execute().state is State.REVIEW
     assert len(planner.prompts) == 1
+
+
+class TurnLimited(FakeModel):
+    """Hits its turn cap the first `limits` times, then finishes normally."""
+
+    def __init__(self, name: str, limits: int, **kwargs: object) -> None:
+        super().__init__(name, **kwargs)  # pyright: ignore[reportArgumentType]
+        self.limits = limits
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        result = super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        if self.limits:
+            self.limits -= 1
+            return replace(result, exit_code=1, stop_reason="max_turns")
+        return result
+
+
+def test_running_out_of_turns_raises_the_level_and_continues(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TurnLimited("mimo", 1, edits=[{"a.md": "x\n"}, {"b.md": "y\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.REVIEW
+    assert worker.turns == [15, 25]
+    assert run.level is Level.MEDIUM
+    assert (
+        "mimo ran out of turns while implementing, so it continued at medium."
+        in run.notes
+    )
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    outcomes = [(r["stage"], r["outcome"]) for r in records]
+    assert ("implement", "turns_exhausted") in outcomes
+    assert ("implement", "ok") in outcomes
+
+
+def test_out_of_turns_at_hard_fails_with_the_reason(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TurnLimited("mimo", 5, edits=[{"a.md": "x\n"}] * 5)
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex")
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "hard"}',
+    )
+    outcome = run.execute()
+    assert outcome == Outcome(
+        State.FAILED,
+        "mimo failed while implementing (it ran out of turns even at the hard level).",
+    )
+    assert worker.turns == [40]

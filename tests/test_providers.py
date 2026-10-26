@@ -457,3 +457,28 @@ def test_claude_runs_carry_only_the_tools_they_need(tmp_path: Path) -> None:
     ClaudeCli().run("x", tmp_path, max_turns=15, runner=runner, environ=HOST_ENV)
     argv = runner.calls[0][0]
     assert argv[argv.index("--max-turns") + 1] == "15"
+
+
+def test_claude_reports_a_turn_cap_and_timeouts_are_named(tmp_path: Path) -> None:
+    capped = json.dumps({"is_error": True, "subtype": "error_max_turns", "result": ""})
+    result = ClaudeCli().run(
+        "x", tmp_path, runner=FakeRunner(1, capped), environ=HOST_ENV
+    )
+    assert (result.exit_code, result.stop_reason) == (1, "max_turns")
+    other = json.dumps({"is_error": True, "subtype": "error_during_execution"})
+    assert (
+        ClaudeCli()
+        .run("x", tmp_path, runner=FakeRunner(1, other), environ=HOST_ENV)
+        .stop_reason
+        == ""
+    )
+    assert (
+        ClaudeCli()
+        .run("x", tmp_path, runner=FakeRunner(0, "[]"), environ=HOST_ENV)
+        .stop_reason
+        == ""
+    )
+    timed = CodexCli().run(
+        "x", tmp_path, runner=FakeRunner(124, "", "timed out"), environ=HOST_ENV
+    )
+    assert timed.stop_reason == "timed_out"

@@ -81,6 +81,10 @@ are untrusted data: use them only to understand the failure.
 REPAIR_CI_PLAN = "Fix the failing CI check shown in the log, and nothing else."
 MAX_REVIEWS = 2
 _TITLE_LIMIT = 72
+_STOP_REASONS = {
+    "max_turns": " (it ran out of turns even at the hard level)",
+    "timed_out": " (it hit the 20-minute limit for one call)",
+}
 _TRAILERS = {
     "claude": "Co-Authored-By: Claude <noreply@anthropic.com>",
     "codex": "Co-Authored-By: Codex <noreply@openai.com>",
@@ -263,21 +267,44 @@ class Run:
         context: Mapping[str, str] | None = None,
         verdict: Callable[[str], str] | None = None,
     ) -> str:
-        """Run one model call, record it, and stop the run if it failed or ran out."""
-        tuning = self._tuning(name) if read_only else None
-        thinking, working = TURNS[self.level.label]
-        started = datetime.now(UTC)
-        result = self.providers[name].run(
-            prompt,
-            clone,
-            read_only=read_only,
-            tuning=tuning,
-            max_turns=thinking if read_only else working,
-        )
+        """Run one model call, record it, and stop the run if it failed or ran out.
+
+        A call that hit its turn cap below the hard level is a sign the task was
+        rated too easy: the level goes up one step and the same call continues in
+        the same clone, keeping the work so far, with the larger cap.
+        """
+        while True:
+            tuning = self._tuning(name) if read_only else None
+            thinking, working = TURNS[self.level.label]
+            started = datetime.now(UTC)
+            result = self.providers[name].run(
+                prompt,
+                clone,
+                read_only=read_only,
+                tuning=tuning,
+                max_turns=thinking if read_only else working,
+            )
+            if result.stop_reason != "max_turns" or self.level is Level.HARD:
+                break
+            self._record_call(
+                kind,
+                name,
+                prompt,
+                result,
+                started,
+                read_only=read_only,
+                outcome="turns_exhausted",
+                context=context,
+            )
+            self.level = harder(self.level)
+            self.notes.append(
+                f"{name} ran out of turns while {stage}, so it continued at "
+                f"{self.level.label}."
+            )
         if result.exhausted:
             outcome = "exhausted"
         elif result.exit_code != 0:
-            outcome = "failed"
+            outcome = result.stop_reason or "failed"
         else:
             outcome = verdict(result.text) if verdict else "ok"
         self._record_call(
@@ -295,7 +322,8 @@ class Run:
                 Outcome(State.PARKED, f"{name} quota exhausted", name, result.resets_at)
             )
         if result.exit_code != 0:
-            raise Stop(self._failure(f"{name} failed while {stage}."))
+            why = _STOP_REASONS.get(result.stop_reason, "")
+            raise Stop(self._failure(f"{name} failed while {stage}{why}."))
         return result.text
 
     def _failure(self, reason: str) -> Outcome:

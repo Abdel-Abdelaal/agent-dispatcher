@@ -11,7 +11,7 @@ import shutil
 import signal
 import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -53,6 +53,8 @@ class RunResult:
     model: str | None = None
     effort: str | None = None
     usage: dict[str, int | float] | None = None
+    # Why a failed call stopped, when the harness says: "max_turns" or "timed_out".
+    stop_reason: str = ""
 
 
 class TermsError(RuntimeError):
@@ -160,6 +162,18 @@ def _claude_json(stdout: str) -> tuple[str, bool]:
     return str(fields.get("result", "")), bool(fields.get("is_error"))
 
 
+def _claude_stop(stdout: str) -> str:
+    """Return "max_turns" if Claude Code stopped at its turn cap, else ""."""
+    try:
+        result: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(result, dict):
+        return ""
+    subtype = cast("dict[str, object]", result).get("subtype")
+    return "max_turns" if subtype == "error_max_turns" else ""
+
+
 def _numbers(
     source: Mapping[str, object], names: Mapping[str, str]
 ) -> dict[str, int | float]:
@@ -237,6 +251,7 @@ def _result(  # noqa: PLR0913 - every field of a result comes from the run
 ) -> RunResult:
     """Build a result; only a failed run can be an exhausted one."""
     failed = code != 0
+    timed_out = code == TIMED_OUT
     return RunResult(
         provider=name,
         exit_code=code,
@@ -248,6 +263,7 @@ def _result(  # noqa: PLR0913 - every field of a result comes from the run
         model=tuning.model if tuning else None,
         effort=tuning.effort or None if tuning else None,
         usage=usage,
+        stop_reason="timed_out" if timed_out else "",
     )
 
 
@@ -359,7 +375,7 @@ class ClaudeCli:
         used = tuning or (None if read_only else self.work)
         if self.gateway is not None:
             used = Tuning(self.gateway.model, "")
-        return _result(
+        result = _result(
             self.name,
             code,
             stdout,
@@ -369,6 +385,8 @@ class ClaudeCli:
             tuning=used,
             usage=_claude_usage(stdout),
         )
+        stop = _claude_stop(stdout)
+        return replace(result, stop_reason=stop) if stop else result
 
 
 def _codex_events(stdout: str) -> tuple[str, str]:
