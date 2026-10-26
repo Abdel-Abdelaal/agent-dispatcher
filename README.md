@@ -1,5 +1,9 @@
 # agent-dispatcher
 
+Already installed? Start with [Using the agent team](docs/using-the-team.md):
+queue a task, inspect progress, review a PR, pause the scheduler and understand
+provider fallback and the current quality limits.
+
 ## Provider fallback
 
 The host can exclude an exhausted provider with
@@ -72,8 +76,8 @@ change the dispatcher.
 
 A provider that reports its limit is parked until the time it gives (Codex prints
 one) or for `DISPATCHER_PARK_HOURS`, and the next run forms a team without it.
-Without any thinker the task waits. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY`
-is set.
+Without a thinker the task waits unless the owner enables worker-only thinking
+as described above. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY` is set.
 
 | Piece | State |
 | --- | --- |
@@ -111,7 +115,8 @@ repository also needs the `agent:*` labels before tasks can be queued there.
 
 When no task is waiting, a cycle looks at open agent PRs (branches named
 `agent/<issue>-run-<id>`). If every required check has finished and one failed, a thinker (the planner) gets
-the tail of each failing required job's log (up to three jobs) for one repair. Workers
+the extracted error lines of each failing required job's log (up to three jobs)
+for one repair. Workers
 can't run linters, and a CI log names exact files and lines. The fix goes through the same gate on a clean clone of the PR branch and a
 read-only review by a thinker, then is pushed to that branch, and the result is
 commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is
@@ -194,7 +199,7 @@ flowchart LR
   Intake --> Queue[SQLite queue, one run at a time]
   Queue --> Quota{Quota guard}
   Quota -- exhausted --> Parked[agent:parked until reset]
-  Quota -- ok --> Run[Claude or Codex CLI in a sandbox, no GitHub token]
+  Quota -- ok --> Run[Restricted provider tools, no GitHub token]
   Run --> Gate{Controller gate: protected paths, diff caps}
   Gate -- refused --> Failed[agent:failed with reason]
   Gate -- passed --> PR[Draft PR, agent:review]
