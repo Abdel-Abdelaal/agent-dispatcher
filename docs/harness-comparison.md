@@ -34,10 +34,10 @@ wall-clock timeout bound each invocation; no paid capacity is provisioned.
 1. Keep the model, issue body, base commit and independent acceptance tests fixed.
 2. Use fresh clones and record controller revision and harness for each attempt.
 3. Measure behavioral checks, lint/types, required CI, review outcomes, tool-budget
-   exhaustion, wall time and known usage. Do not infer quality from a successful
-   CLI exit or an agent's approval.
+    exhaustion, wall time and known usage. Do not infer quality from a successful
+    CLI exit or an agent's approval.
 4. Compare against the current harness before changing the deployed default.
-   Do not switch a running task's configuration. Failed attempts remain evidence.
+    Do not switch a running task's configuration. Failed attempts remain evidence.
 
 The first comparison can reuse the frozen nonstandard-HTTP-status task and its
 held-out checks. Refactor evaluation separately verifies reuse, custom collision
