@@ -57,3 +57,26 @@ def test_the_lock_survives_a_restart(tmp_path: Path) -> None:
     with pytest.raises(RunActiveError):
         reopened.start_run(Task("o/r", 2, "t"), "claude", NOW)
     reopened.close()
+
+
+def test_a_finished_task_labelled_ready_again_is_requeued(queue: RunQueue) -> None:
+    queue.enqueue(issue(1), NOW)
+    run = queue.start_run(
+        Task("o/r", 1, "task 1"), "claude", NOW + timedelta(minutes=1)
+    )
+    assert not queue.enqueue(issue(1), NOW + timedelta(minutes=2))
+    queue.finish_run(run, "failed", NOW + timedelta(minutes=3))
+    assert queue.next_task() is None
+    assert queue.enqueue(issue(1), NOW + timedelta(minutes=4))
+    assert queue.next_task() == Task("o/r", 1, "task 1")
+    assert not queue.enqueue(issue(1), NOW + timedelta(minutes=5))
+
+
+def test_a_parked_task_is_not_requeued_but_still_waits(queue: RunQueue) -> None:
+    queue.enqueue(issue(1), NOW)
+    run = queue.start_run(
+        Task("o/r", 1, "task 1"), "claude", NOW + timedelta(minutes=1)
+    )
+    queue.finish_run(run, "parked", NOW + timedelta(minutes=2))
+    assert not queue.enqueue(issue(1), NOW + timedelta(minutes=3))
+    assert queue.next_task() == Task("o/r", 1, "task 1")
