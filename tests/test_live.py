@@ -20,7 +20,7 @@ from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.levels import DEFAULT_LADDER, Level
 from agent_dispatcher.providers import ClaudeCli, RunResult, Tuning, subprocess_runner
-from agent_dispatcher.publish import GitHubWriter, PublishError
+from agent_dispatcher.publish import GitHubWriter, PublishError, error_lines
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
@@ -1122,3 +1122,31 @@ def test_repair_does_not_wait_for_advisory_or_optional_checks() -> None:
         )
         is None
     )
+
+
+TYPES = "ci / Types\tUNKNOWN STEP\t2026-10-26T11:19:04.6252790Z "
+LINT = "ci / Lint\tUNKNOWN STEP\t2026-10-26T11:19:01.1Z "
+REAL_FAILED_LOG = "\n".join(
+    [
+        TYPES + "  /w/tests/test_api.py:172:23 - error: Argument of type bytes",
+        TYPES + "4 errors, 0 warnings, 0 informations",
+        TYPES + "##[error]Process completed with exit code 1.",
+        LINT + "##[error]tests/test_api.py:165:11: N818 Exception name `Custom`",
+        TYPES + "Oct 26 runner agentservice[2044]: INFO Listening module=armour",
+        TYPES + "Cleaning up orphan processes",
+    ]
+)
+
+
+def test_error_lines_keep_the_failure_not_the_runner_noise() -> None:
+    lines = error_lines(REAL_FAILED_LOG).splitlines()
+    assert lines[0] == "  /w/tests/test_api.py:172:23 - error: Argument of type bytes"
+    assert "N818" in lines[3]
+    assert not any("agentservice" in line or "orphan" in line for line in lines)
+    assert all("UNKNOWN STEP" not in line for line in lines)
+
+
+def test_error_lines_fall_back_to_the_cleaned_tail() -> None:
+    stamp = "job\tstep\t2026-10-26T11:19:06.2Z "
+    log = f"{stamp}some output\n{stamp}more"
+    assert error_lines(log, limit=1) == "more"

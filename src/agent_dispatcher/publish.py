@@ -1,5 +1,6 @@
 """GitHub writes, through the `gh` CLI and only from the controller."""
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -63,14 +64,14 @@ class GitHubWriter:
         )
 
     def failed_log(self, repo: str, job_id: str, lines: int = 120) -> str:
-        """Return the tail of a failed Actions job's log, or "" if it can't be read."""
+        """Return the error lines of a failed Actions job's log, or "" if unreadable."""
         try:
             log = self._gh(
                 "run", "view", "--repo", repo, "--job", job_id, "--log-failed"
             )
         except PublishError:
             return ""
-        return "\n".join(log.splitlines()[-lines:])
+        return error_lines(log, lines)
 
     def draft_pr(self, repo: str, branch: str, base: str, title: str, body: str) -> str:
         """Open a draft PR labelled `ai-generated` and return its URL."""
@@ -92,3 +93,28 @@ class GitHubWriter:
             "-",
             stdin=body,
         )
+
+
+# `gh run view --log-failed` prefixes every line with job, step and timestamp.
+_PREFIX = re.compile(r"^[^\t]*\t[^\t]*\t\d{4}-\d{2}-\d{2}T[\d:.]+Z ?")
+# Runner and harden-runner chatter that fills the end of every failed log.
+_NOISE = re.compile(
+    r"agentservice|module=armour|RingBuffer|Cleaning up orphan|##\[(?:group|endgroup)\]"
+)
+# Lines that say what failed: annotations, tool diagnostics, test failures.
+_SIGNAL = re.compile(
+    r"##\[error\]|\berror\b|Error|FAILED|^E\s|^\s*-->|\b[A-Z]{1,4}\d{3,4}\b"
+    r"|\d+ (?:errors?|failed)|would reformat|Found \d+ error"
+)
+
+
+def error_lines(log: str, limit: int = 120) -> str:
+    """Return the lines of a CI log that say what failed, without runner noise.
+
+    The end of a failed log is runner cleanup, not the failure, so keeping the
+    tail hid every real error from the repairing model.
+    """
+    cleaned = [_PREFIX.sub("", line) for line in log.splitlines()]
+    useful = [line for line in cleaned if line.strip() and not _NOISE.search(line)]
+    signal = [line for line in useful if _SIGNAL.search(line)]
+    return "\n".join((signal or useful)[-limit:])
