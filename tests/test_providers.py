@@ -59,7 +59,7 @@ def test_claude_gets_its_token_but_no_other_secret(tmp_path: Path) -> None:
     argv, cwd, stdin, env = runner.calls[0]
     assert argv[:2] == ["claude", "-p"]
     assert argv[argv.index("--setting-sources") + 1] == "local"
-    assert "Bash,WebFetch,WebSearch" in argv
+    assert "Bash,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite" in argv
     assert (cwd, stdin) == (tmp_path, "do it")
     assert set(env) == {"PATH", "HOME", "CLAUDE_CODE_OAUTH_TOKEN"}
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-token"
@@ -441,3 +441,19 @@ def test_a_stuck_cli_is_killed_with_its_children(tmp_path: Path) -> None:
     )
     assert code == 124
     assert "timed out after 2s" in stderr
+
+
+def test_claude_runs_carry_only_the_tools_they_need(tmp_path: Path) -> None:
+    think = ClaudeCli().argv(read_only=True, max_turns=10)
+    work = ClaudeCli().argv(read_only=False)
+    assert think[think.index("--tools") + 1] == "Read,Glob,Grep"
+    assert work[work.index("--tools") + 1] == "Read,Edit,Write,Glob,Grep"
+    assert "--strict-mcp-config" in think
+    assert "--strict-mcp-config" in work
+    assert "Task" in work[work.index("--disallowedTools") + 1]
+    assert think[think.index("--max-turns") + 1] == "10"
+    assert work[work.index("--max-turns") + 1] == "40"
+    runner = FakeRunner()
+    ClaudeCli().run("x", tmp_path, max_turns=15, runner=runner, environ=HOST_ENV)
+    argv = runner.calls[0][0]
+    assert argv[argv.index("--max-turns") + 1] == "15"

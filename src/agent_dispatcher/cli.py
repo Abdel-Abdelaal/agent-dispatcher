@@ -213,6 +213,7 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         limits=Limits(settings.max_files, settings.max_lines),
         triage=triage(settings, client),
         ladder=settings.thinking_ladder,
+        skip_easy_docs_plan=settings.skip_plan_for_easy_docs,
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
     )

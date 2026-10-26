@@ -132,8 +132,13 @@ def scrubbed_env(
     return env
 
 
-_DENY_READ_ONLY = "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
-_DENY_EDITING = "Bash,WebFetch,WebSearch"
+# Only these built-in tools exist in a run, so the rest aren't sent with every
+# turn: thinkers read, workers read and edit. No shell, web, subagents or to-dos.
+_TOOLS_READ_ONLY = "Read,Glob,Grep"
+_TOOLS_EDITING = "Read,Edit,Write,Glob,Grep"
+# Belt and braces: deny the risky ones by name as well.
+_DENY_READ_ONLY = "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite"
+_DENY_EDITING = "Bash,NotebookEdit,WebFetch,WebSearch,Task,TodoWrite"
 _MODEL_VARIABLES = (
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -290,13 +295,21 @@ class ClaudeCli:
     max_turns: int = 40
     name: str = "claude"
 
-    def argv(self, *, read_only: bool, tuning: Tuning | None = None) -> list[str]:
+    def argv(
+        self,
+        *,
+        read_only: bool,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> list[str]:
         """Return the command line; the prompt goes on stdin.
 
         `--setting-sources local` skips user settings (which may route Claude Code
         to another provider) and the repository's own `.claude/settings.json`,
         whose hooks would otherwise run. Without a sandbox there is no Bash: the
         agent edits files, and CI runs the code. Thinking runs can't edit at all.
+        `--tools` keeps unused tool definitions out of every turn, and
+        `--strict-mcp-config` with no config loads no MCP servers at all.
         """
         argv = [
             "claude",
@@ -304,11 +317,14 @@ class ClaudeCli:
             "--output-format",
             "json",
             "--max-turns",
-            str(self.max_turns),
+            str(max_turns or self.max_turns),
             "--setting-sources",
             "local",
+            "--strict-mcp-config",
             "--permission-mode",
             "acceptEdits",
+            "--tools",
+            _TOOLS_READ_ONLY if read_only else _TOOLS_EDITING,
             "--disallowedTools",
             _DENY_READ_ONLY if read_only else _DENY_EDITING,
         ]
@@ -326,6 +342,7 @@ class ClaudeCli:
         *,
         read_only: bool = False,
         tuning: Tuning | None = None,
+        max_turns: int | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -335,7 +352,7 @@ class ClaudeCli:
             env.update(self.gateway.env())
         elif self.oauth_token is not None:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self.oauth_token.get_secret_value()
-        argv = self.argv(read_only=read_only, tuning=tuning)
+        argv = self.argv(read_only=read_only, tuning=tuning, max_turns=max_turns)
         code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, is_error = _claude_json(stdout)
         code = code or int(is_error)
@@ -412,6 +429,7 @@ class CodexCli:
         *,
         read_only: bool = False,
         tuning: Tuning | None = None,
+        max_turns: int | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -419,6 +437,7 @@ class CodexCli:
         if environ.get("GITHUB_ACTIONS") == "true":
             message = "Codex subscription runs are for the controller host only"
             raise TermsError(message)
+        del max_turns  # Codex has no turn cap; its own budget applies.
         env = scrubbed_env(environ, ("CODEX_HOME",))
         argv = self.argv(worktree, read_only=read_only, tuning=tuning)
         code, stdout, stderr = runner(argv, worktree, prompt, env)
@@ -478,6 +497,7 @@ class OpenCodeCli:
         *,
         read_only: bool = False,
         tuning: Tuning | None = None,
+        max_turns: int | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -486,7 +506,7 @@ class OpenCodeCli:
         On Windows, untrusted text in the arguments of a `.cmd` shim can inject
         commands, so the issue text only ever travels in a file.
         """
-        del tuning  # NVIDIA's model is fixed; it never thinks for the team.
+        del tuning, max_turns  # NVIDIA's model is fixed; OpenCode has no turn cap.
         prompt_file = worktree.parent / f"{worktree.name}.prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
         env = scrubbed_env(environ)

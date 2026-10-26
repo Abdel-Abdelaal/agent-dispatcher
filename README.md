@@ -69,6 +69,20 @@ is set.
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
+### Keeping token use down
+
+- Each run gets only the tools it needs (`--tools`): thinkers get Read, Glob and Grep,
+  and workers add Edit and Write. No MCP servers load (`--strict-mcp-config`).
+  Unused tool definitions aren't resent on every turn. On one paired MiMo run this
+  cut input tokens from 30,263 to 7,315, with the same result.
+- Turn caps follow the task's level: 10/15 turns (thinking/working) for easy tasks,
+  15/25 for medium, and 25/40 for hard.
+- Fixed instructions come first in every prompt and the issue last, so provider
+  caching can reuse the prefix.
+- `DISPATCHER_SKIP_PLAN_FOR_EASY_DOCS=true` is an experiment, off by default. It sends
+  easy documentation tasks straight to the worker, and the review still checks them.
+  Compare telemetry before keeping it on.
+
 ### Which repositories
 
 `DISPATCHER_REPOS=auto` watches every public, non-fork, non-archived repository the
