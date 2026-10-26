@@ -44,10 +44,10 @@ The level can move during a run:
 
 1. Triage sets the first level.
 2. The planner rates the task on its first line. If it rates it harder than the
-   level it planned at, it plans again at the new level. If it rates it easier, the
-   review drops to the cheaper setting.
+    level it planned at, it plans again at the new level. If it rates it easier, the
+    review drops to the cheaper setting.
 3. Each rejected review raises the level one step for the repair and the next
-   review.
+    review.
 
 The level used is noted in the PR and in an `Agent-Level` commit trailer. The ladder
 is the `DISPATCHER_THINKING_LADDER` setting (JSON), and the dispatcher passes every
