@@ -104,7 +104,7 @@ _NOISE = re.compile(
 # Lines that say what failed: annotations, tool diagnostics, test failures.
 _SIGNAL = re.compile(
     r"##\[error\]|\berror\b|Error|FAILED|^E\s|^\s*--!?>|\b[A-Z]{1,4}\d{3,4}\b"
-    r"|\d+ (?:errors?|failed)|would reformat|Found \d+ error"
+    r"|\d+ (?:errors?|failed)|would reformat|Found \d+ error|==>"
 )
 
 

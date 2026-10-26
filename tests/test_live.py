@@ -1129,7 +1129,7 @@ LINT = "ci / Lint\tUNKNOWN STEP\t2026-10-26T11:19:01.1Z "
 REAL_FAILED_LOG = "\n".join(
     [
         TYPES + "  /w/tests/test_api.py:172:23 - error: Argument of type bytes",
-        TYPES + "4 errors, 0 warnings, 0 informations",
+        TYPES + "4 errors, 0 warnings",
         TYPES + "##[error]Process completed with exit code 1.",
         LINT + "##[error]tests/test_api.py:165:11: N818 Exception name `Custom`",
         TYPES + "Oct 26 runner agentservice[2044]: INFO Listening module=armour",
@@ -1150,3 +1150,8 @@ def test_error_lines_fall_back_to_the_cleaned_tail() -> None:
     stamp = "job\tstep\t2026-10-26T11:19:06.2Z "
     log = f"{stamp}some output\n{stamp}more"
     assert error_lines(log, limit=1) == "more"
+
+
+def test_error_lines_keep_spelling_details() -> None:
+    log = "tests/test_api.py:7: typo ==> correction\nCleaning up orphan processes"
+    assert error_lines(log) == "tests/test_api.py:7: typo ==> correction"
