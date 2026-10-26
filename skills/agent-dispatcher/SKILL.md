@@ -136,6 +136,6 @@ schtasks /Change /TN agent-dispatcher /DISABLE
 schtasks /Change /TN agent-dispatcher /ENABLE
 ```
 
-To change the repositories, edit `DISPATCHER_REPOS` (comma-separated `owner/name`) in `.env` without printing the file. Each repo needs the `agent:*` labels from the handbook catalog.
+To change the repositories, edit `DISPATCHER_REPOS` (comma-separated `owner/name`) in `.env` without printing the file. Each repository needs the `agent:*` labels from the handbook catalog.
 
 After agent-dispatcher's own PRs merge, run `git pull` and then `uv sync --locked` in `D:\showcase\agent-dispatcher`, because the scheduled task runs whatever is checked out.
