@@ -40,13 +40,20 @@ availability. A signed suggestion can be wrong; the agent may decline it.
 
 ## Start, inspect or pause
 
-On Abdel's configured laptop, open a terminal and run `mimo`. This saves
+On Abdel's configured laptop, open a terminal and run `mimo`. It asks for the
+public repository name, goal and acceptance criteria, creates an owner-authorized
+public `agent:ready` issue, then starts the orchestrator. It does not open a direct
+model chat. Never put secrets in these public task prompts.
+
+This saves
 MiMo-only planning, coding and review for future cycles, then requests a cycle
 through the existing scheduler, including audit intake and telemetry delivery.
-It processes the next `agent:ready` issue; it does not invent a task or reopen a
-failed one. Use `mimo status` for the queue and recent runs, or `mimo logs` to
+It processes the next `agent:ready` issue in queue order. Use `mimo start` to run
+already queued work without creating an issue. It does not reopen a failed task.
+Use `mimo status` for the queue and recent runs, or `mimo logs` to
 watch the controller log. Ctrl+C stops watching without cancelling the run.
 An active run or paused schedule is left alone. This does not buy capacity.
+An exhausted MiMo allowance still prevents execution until availability returns.
 The installed command points to `scripts/mimo.ps1` in the protected main checkout.
 
 These PowerShell commands use the installed controller. They do not print keys.

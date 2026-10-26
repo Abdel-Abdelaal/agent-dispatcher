@@ -1,13 +1,14 @@
 # Installed as the laptop's `mimo` command. No credentials are displayed.
 [CmdletBinding()]
 param(
-    [ValidateSet('start', 'status', 'logs')]
-    [string]$Mode = 'start'
+    [ValidateSet('task', 'start', 'status', 'logs')]
+    [string]$Mode = 'task'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repo '.venv\Scripts\agent-dispatcher.exe'
+Write-Output 'MiMo orchestrator: task -> plan -> code -> review -> gated draft PR.'
 if ($Mode -eq 'logs') {
     Get-Content -LiteralPath (Join-Path $repo 'runs\dispatcher.log') -Tail 30 -Wait
     return
@@ -24,6 +25,29 @@ if ($task.State -eq 'Running') {
 }
 if ($task.State -eq 'Disabled') {
     throw 'The schedule is paused. Enable agent-dispatcher before starting it.'
+}
+
+if ($Mode -eq 'task') {
+    $target = (Read-Host 'Public repo name (for example shortlink)').Trim()
+    if ($target -notmatch '^[A-Za-z0-9_.-]+$' -or $target -eq 'agent-dispatcher') {
+        throw 'Use an owned public application repo name; the controller is excluded.'
+    }
+    $target = 'Abdel-Abdelaal/' + $target
+    $details = & gh repo view $target --json nameWithOwner,isPrivate,isArchived,isFork
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the repository; nothing queued.' }
+    $details = $details | ConvertFrom-Json
+    if ($details.nameWithOwner -ine $target -or $details.isPrivate -or
+        $details.isArchived -or $details.isFork) {
+        throw 'Only owned public, active, non-fork repositories can be queued.'
+    }
+    $login = & gh api user --jq '.login'
+    if ($LASTEXITCODE -ne 0 -or $login.Trim() -ine 'Abdel-Abdelaal') {
+        throw 'Sign in to GitHub CLI as the owner before authorizing a task.'
+    }
+    Write-Output "This task will be a public GitHub issue in $target. Do not enter secrets."
+    $goal = (Read-Host 'What should it do?').Trim()
+    $acceptance = (Read-Host 'How will we know it is done?').Trim()
+    if (!$goal -or !$acceptance) { throw 'Goal and acceptance criteria are required.' }
 }
 
 # Prevent a scheduled start while changing the next run's provider settings.
@@ -64,7 +88,21 @@ try {
 } finally {
     Enable-ScheduledTask -TaskName 'agent-dispatcher' | Out-Null
 }
+if ($Mode -eq 'task') {
+    $bodyPath = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.md')
+    try {
+        $body = "## Goal`n$goal`n`n## Done when`n$acceptance`n`n## Constraints`nReuse existing code; add relevant regression tests. Preserve required checks and protected paths. Publish a draft PR; do not merge.`n"
+        [IO.File]::WriteAllText($bodyPath, $body, [Text.UTF8Encoding]::new($false))
+        $title = $goal.Substring(0, [Math]::Min(120, $goal.Length))
+        $issue = & gh issue create --repo $target --title $title --body-file $bodyPath --label 'agent:ready'
+        if ($LASTEXITCODE -ne 0) { throw 'Issue creation failed; no cycle was requested. Check GitHub before retrying.' }
+        Write-Output "Task queued: $issue"
+    } finally {
+        if (Test-Path -LiteralPath $bodyPath) { Remove-Item -LiteralPath $bodyPath }
+    }
+}
 Start-ScheduledTask -TaskName 'agent-dispatcher'
 Write-Output 'MiMo-only mode saved. Requested one scheduled cycle; overlapping runs are ignored.'
 Write-Output 'It takes the next agent:ready issue. Draft PRs and CI stay on GitHub.'
+Write-Output 'Provider quota still applies. Exhausted providers wait; no paid capacity is enabled.'
 Write-Output 'Progress: mimo status | Live log: mimo logs (Ctrl+C stops watching only).'
