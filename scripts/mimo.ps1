@@ -55,7 +55,7 @@ try {
     $temporary = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
     try {
         [IO.File]::WriteAllText($temporary, $content, [Text.UTF8Encoding]::new($false))
-        [IO.File]::Replace($temporary, $path, $null)
+        [IO.File]::Replace($temporary, $path, [NullString]::Value)
     } finally {
         if (Test-Path -LiteralPath $temporary) {
             Remove-Item -LiteralPath $temporary
