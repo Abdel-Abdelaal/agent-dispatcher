@@ -16,6 +16,7 @@ from agent_dispatcher.providers import (
     ChatApi,
     ClaudeCli,
     CodexCli,
+    Tuning,
     mimo,
     mimo_worker,
     nvidia,
@@ -78,8 +79,13 @@ def describe(plan: Plan, *, dry_run: bool) -> str:
 def providers(settings: Settings) -> dict[str, Provider]:
     """Return an adapter for every configured provider."""
     adapters: dict[str, Provider] = {
-        "claude": ClaudeCli(oauth_token=settings.claude_oauth_token),
-        "codex": CodexCli(),
+        "claude": ClaudeCli(
+            oauth_token=settings.claude_oauth_token,
+            work=Tuning(settings.claude_work_model, settings.claude_work_effort),
+        ),
+        "codex": CodexCli(
+            work=Tuning(settings.codex_work_model, settings.codex_work_effort)
+        ),
     }
     if settings.mimo_api_key:
         adapters["mimo"] = mimo_worker(settings.mimo_api_key)
@@ -131,6 +137,7 @@ def run_live(
             writer=GitHubWriter(subprocess_runner, os.environ, root),
             limits=Limits(settings.max_files, settings.max_lines),
             triage=triage(settings, client),
+            ladder=settings.thinking_ladder,
         ).execute()
     finally:
         queue.finish_run(run_id, outcome.state.name.lower(), datetime.now(UTC))
