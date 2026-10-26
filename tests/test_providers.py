@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -423,3 +424,20 @@ def test_opencode_usage_stays_unknown(tmp_path: Path) -> None:
         "z-ai/glm-5.3-flash",
         None,
     )
+
+
+def test_a_stuck_cli_is_killed_with_its_children(tmp_path: Path) -> None:
+    child = "import time; time.sleep(6)"
+    script = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(6)"
+    )
+    code, _, stderr = subprocess_runner(
+        ["python", "-c", script],
+        tmp_path,
+        "",
+        {**scrubbed_env(HOST_ENV), **os.environ},
+        timeout=2,
+    )
+    assert code == 124
+    assert "timed out after 2s" in stderr

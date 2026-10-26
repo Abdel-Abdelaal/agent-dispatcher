@@ -665,8 +665,15 @@ class FakeReader:
         del repo
         return [AgentPr(9, "agent/7-run-3", "abc", 7)]
 
-    def failed_checks(self, repo: str, sha: str) -> list[FailedCheck] | None:
+    def required_checks(self, repo: str, branch: str) -> set[str]:
+        del repo, branch
+        return {"ci / Test"}
+
+    def failed_checks(
+        self, repo: str, sha: str, required: set[str] | None = None
+    ) -> list[FailedCheck] | None:
         del repo, sha
+        assert required == {"ci / Test"}
         return self.failed
 
     def issue(self, repo: str, number: int) -> Issue:
@@ -856,3 +863,103 @@ def test_triage_model_follows_the_keys() -> None:
         == "z-ai/glm-5.3-flash"
     )
     assert cli.triage_model(Settings(mimo_api_key=None, nvidia_api_key=None)) is None
+
+
+def rules_client(status: int, rules: list[dict[str, object]]) -> httpx.Client:
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/rules/branches/main")
+        return httpx.Response(status, json=rules)
+
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def test_required_checks_come_from_the_ruleset() -> None:
+    rules: list[dict[str, object]] = [
+        {"type": "pull_request", "parameters": {}},
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [
+                    {"context": "ci / Test"},
+                    {"context": "pr-title / Conventional title"},
+                ]
+            },
+        },
+    ]
+    reader = GitHubReader(rules_client(200, rules))
+    assert reader.required_checks("o/r", "main") == {
+        "ci / Test",
+        "pr-title / Conventional title",
+    }
+    assert GitHubReader(rules_client(404, [])).required_checks("o/r", "main") == set()
+
+
+def test_only_required_failures_are_repaired() -> None:
+    done = [
+        {
+            "name": "ci / Test",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": "x/job/1",
+        },
+        {
+            "name": "lint / Lint (all languages)",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": "x/job/2",
+        },
+    ]
+    reader = GitHubReader(pulls_client(done))
+    assert reader.failed_checks("o/r", "abc", {"ci / Test"}) == [
+        FailedCheck("ci / Test", "1")
+    ]
+    assert reader.failed_checks("o/r", "abc", set()) == []
+
+
+class Crashing(FakeModel):
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+    ) -> RunResult:
+        del prompt, worktree, read_only, tuning
+        message = "boom"
+        raise RuntimeError(message)
+
+
+def test_an_unexpected_error_still_ends_in_a_final_state(
+    tmp_path: Path, origin: Path
+) -> None:
+    gh = FakeGh()
+    run = team_run(
+        tmp_path,
+        origin,
+        (Crashing("claude"), FakeModel("mimo"), FakeModel("codex")),
+        gh,
+    )
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute() == Outcome(State.FAILED, "Controller error: RuntimeError.")
+    assert gh.labels()[-1] == ("agent:running", "agent:failed")
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert (records[-1]["stage"], records[-1]["reason"]) == ("error", "RuntimeError")
+    pr = published_pr(tmp_path, origin)
+    (tmp_path / "work2").mkdir()
+    repair = team_run(
+        tmp_path / "work2",
+        origin,
+        (FakeModel("claude"), Crashing("mimo"), FakeModel("codex")),
+        gh2 := FakeGh(),
+    )
+    repair.run_id = 6
+    assert repair.repair(pr, "log") == Outcome(
+        State.FAILED, "Controller error: RuntimeError."
+    )
+    assert any(argv[1:3] == ["pr", "comment"] for argv, _ in gh2.calls)

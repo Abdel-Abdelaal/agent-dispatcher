@@ -69,11 +69,19 @@ is set.
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
+### Which repositories
+
+`DISPATCHER_REPOS=auto` watches every public, non-fork, non-archived repository the
+owner has, discovered on each cycle, so a new repository joins without a settings
+change. Private repositories are never discovered. The controller's own repository
+is always excluded (`DISPATCHER_EXCLUDE_REPOS`), so no agent can edit its gate. A
+repository also needs the `agent:*` labels before tasks can be queued there.
+
 ### CI repair
 
 When no task is waiting, a cycle looks at open agent PRs (branches named
-`agent/<issue>-run-<id>`). If every check has finished and a blocking one failed,
-the worker gets the tail of each failing job's log (up to three jobs) for one
+`agent/<issue>-run-<id>`). If every check has finished and one the branch's ruleset requires failed,
+the worker gets the tail of each failing required job's log (up to three jobs) for one
 repair. The fix goes through the same gate on a clean clone of the PR branch and a
 read-only review by a thinker, then is pushed to that branch, and the result is
 commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     repos: Annotated[list[str], NoDecode, BeforeValidator(_split_repos)] = Field(
         default_factory=lambda: ["Abdel-Abdelaal/shortlink"]
     )
+    # "auto" discovers every public, non-fork, non-archived repository the owner
+    # has, so new repositories join without a settings change.
+    exclude_repos: Annotated[list[str], NoDecode, BeforeValidator(_split_repos)] = (
+        Field(default_factory=lambda: ["Abdel-Abdelaal/agent-dispatcher"])
+    )
     db_path: Path = Path("dispatcher.sqlite3")
     max_weekly_share: float = Field(default=0.6, gt=0, le=1)
     max_files: int = Field(default=15, gt=0)
@@ -38,6 +43,9 @@ class Settings(BaseSettings):
     park_hours: float = Field(default=5, gt=0)
     github_token: SecretStr | None = None
     claude_oauth_token: SecretStr | None = None
+    # A trusted CLI (stdin to stdout) that scans excerpts before they're kept.
+    # Without it, telemetry keeps only each output's hash and length.
+    output_scanner: Path | None = None
     # Thinking (plan, review) follows the task's level: see levels.DEFAULT_LADDER.
     # Override with JSON, e.g. {"claude": {"hard": ["claude-opus-5-5", "max"]}}.
     thinking_ladder: dict[str, dict[str, tuple[str, str]]] = Field(

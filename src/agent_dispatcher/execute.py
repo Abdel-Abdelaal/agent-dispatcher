@@ -21,7 +21,7 @@ from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
 from agent_dispatcher.states import State
-from agent_dispatcher.telemetry import Telemetry, output_fields, sha256
+from agent_dispatcher.telemetry import Telemetry, sha256
 from agent_dispatcher.workspace import GitError, Workspace
 
 TRIAGE = """\
@@ -181,6 +181,10 @@ class Run:
     branch: str | None = None
     attempts: int = 0
 
+    def _output(self, text: str) -> dict[str, object]:
+        """Describe a model's output through the telemetry's privacy rules."""
+        return self.telemetry.output(text) if self.telemetry else {}
+
     def _record(self, stage: str, provider: str, **fields: object) -> None:
         """Write one telemetry record for this run, if telemetry is on."""
         if self.telemetry is None:
@@ -230,7 +234,7 @@ class Run:
             exhausted=result.exhausted,
             resets_at=result.resets_at.isoformat() if result.resets_at else None,
             usage=result.usage,
-            **output_fields(result.text),
+            **self._output(result.text),
         )
 
     def _tuning(self, name: str) -> Tuning | None:
@@ -310,9 +314,7 @@ class Run:
         rated = parse_level(verdict.get("difficulty")) if verdict else None
         self.level = rated or self.level
         outcome = "declined" if declined else "proceed"
-        self._record(
-            "triage", "triage", outcome=outcome, **base, **output_fields(reply)
-        )
+        self._record("triage", "triage", outcome=outcome, **base, **self._output(reply))
         if declined and verdict is not None:
             raise Stop(self._failure(f"Triage declined: {verdict.get('reason', '')}"))
         self.notes.append(f"Triage: proceed, rated {self.level.label}.")
@@ -442,6 +444,11 @@ class Run:
             outcome = self._work()
         except Stop as stop:
             outcome = stop.outcome
+        except Exception as error:  # noqa: BLE001 - never leave a task stuck running
+            outcome = self._failure(f"Controller error: {type(error).__name__}.")
+            self._record(
+                "error", "controller", outcome="error", reason=type(error).__name__
+            )
         if outcome.state is State.PARKED:
             self.writer.move(repo, number, State.RUNNING, State.PARKED)
         elif outcome.state is State.FAILED:
@@ -523,6 +530,11 @@ class Run:
             outcome = self._repair(pr, logs)
         except Stop as stop:
             outcome = stop.outcome
+        except Exception as error:  # noqa: BLE001 - report on the PR, don't crash
+            outcome = self._failure(f"Controller error: {type(error).__name__}.")
+            self._record(
+                "error", "controller", outcome="error", reason=type(error).__name__
+            )
         if outcome.state is not State.PARKED:
             verb = "pushed a CI repair" if outcome.state is State.REVIEW else "stopped"
             self.writer.pr_comment(

@@ -31,8 +31,25 @@ from agent_dispatcher.quota import Quota
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import State, state_of
-from agent_dispatcher.telemetry import Telemetry
+from agent_dispatcher.telemetry import (
+    Telemetry,
+    command_scanner,
+    controller_revision,
+)
 from agent_dispatcher.workspace import Workspace
+
+
+def target_repos(settings: Settings, reader: GitHubReader) -> list[str]:
+    """Return the repositories to watch: discovered with "auto", else as listed.
+
+    The controller's own repository is always excluded, so no agent can edit its gate.
+    """
+    if [repo.lower() for repo in settings.repos] == ["auto"]:
+        repos = reader.owned_public_repos(settings.owner)
+    else:
+        repos = list(settings.repos)
+    excluded = {repo.lower() for repo in settings.exclude_repos}
+    return [repo for repo in repos if repo.lower() not in excluded]
 
 
 def configured(settings: Settings) -> list[str]:
@@ -122,9 +139,26 @@ def triage_model(settings: Settings) -> str | None:
     return None
 
 
+def held_secrets(settings: Settings) -> list[str]:
+    """Return every credential the controller holds, so telemetry can scrub it."""
+    held = [
+        settings.github_token,
+        settings.claude_oauth_token,
+        settings.mimo_api_key,
+        settings.nvidia_api_key,
+    ]
+    return [secret.get_secret_value() for secret in held if secret]
+
+
 def telemetry(settings: Settings) -> Telemetry:
-    """Return the local attempt log under the work root."""
-    return Telemetry(settings.work_root.resolve() / "telemetry")
+    """Return the local attempt log under the work root, with its privacy rules."""
+    scanner = settings.output_scanner
+    return Telemetry(
+        settings.work_root.resolve() / "telemetry",
+        secrets=held_secrets(settings),
+        scanner=command_scanner(scanner) if scanner and scanner.is_absolute() else None,
+        revision=controller_revision(Path(__file__).resolve().parent),
+    )
 
 
 def record_routing(
@@ -243,11 +277,12 @@ def repair_next(
     team = choose_team(known, settings.max_weekly_share, now)
     if team is None:
         return None
-    for repo in settings.repos:
+    for repo in target_repos(settings, reader):
         for pr in reader.agent_prs(repo):
             if queue.repairs(repo, pr.number) >= MAX_CI_REPAIRS:
                 continue
-            failed = reader.failed_checks(repo, pr.sha)
+            required = reader.required_checks(repo, pr.base)
+            failed = reader.failed_checks(repo, pr.sha, required)
             if not failed:
                 continue
             root = work_root(settings)
@@ -324,7 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reader = GitHubReader(client, token)
             cycle = Cycle(
                 owner=settings.owner,
-                repos=settings.repos,
+                repos=target_repos(settings, reader),
                 read_issues=reader.ready_issues,
                 queue=queue,
                 max_share=settings.max_weekly_share,
