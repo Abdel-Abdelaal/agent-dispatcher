@@ -13,6 +13,7 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
     ".github/*",
     ".claude/*",
     ".codex/*",
+    ".opencode/*",
     ".mcp.json",
     "codeowners",
     "agents.md",

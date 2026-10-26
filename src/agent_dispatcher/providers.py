@@ -238,7 +238,7 @@ def _codex_usage(stdout: str) -> dict[str, int | float] | None:
     return usage
 
 
-def _result(  # noqa: PLR0913 - every field of a result comes from the run
+def provider_result(  # noqa: PLR0913 - every field of a result comes from the run
     name: str,
     code: int,
     stdout: str,
@@ -375,7 +375,7 @@ class ClaudeCli:
         used = tuning or (None if read_only else self.work)
         if self.gateway is not None:
             used = Tuning(self.gateway.model, "")
-        result = _result(
+        result = provider_result(
             self.name,
             code,
             stdout,
@@ -461,7 +461,7 @@ class CodexCli:
         code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, errors = _codex_events(stdout)
         code = code or int(bool(errors))
-        return _result(
+        return provider_result(
             self.name,
             code,
             stdout,
@@ -541,7 +541,7 @@ class OpenCodeCli:
             "Do the task in the attached file.",
         ]
         code, stdout, stderr = runner(argv, worktree, "", env)
-        return _result(
+        return provider_result(
             self.name,
             code,
             stdout,
