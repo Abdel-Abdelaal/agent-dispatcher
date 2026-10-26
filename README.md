@@ -69,6 +69,16 @@ is set.
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
+### CI repair
+
+When no task is waiting, a cycle looks at open agent PRs (branches named
+`agent/<issue>-run-<id>`). If every check has finished and a blocking one failed,
+the worker gets the tail of each failing job's log (up to three jobs) for one
+repair. The fix goes through the same gate on a clean clone of the PR branch and a
+read-only review by a thinker, then is pushed to that branch, and the result is
+commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is
+repaired at most once: if that doesn't fix it, a human should look.
+
 ## Install
 
 Python 3.12 and [uv](https://docs.astral.sh/uv/).

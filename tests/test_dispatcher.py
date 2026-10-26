@@ -136,3 +136,24 @@ def test_cli_live_cycle_runs_the_planned_task(
     assert capsys.readouterr().out.splitlines()[-1] == (
         "result: agent:review https://pr"
     )
+
+
+def test_cli_repairs_when_no_task_is_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DISPATCHER_REPOS", "o/r")
+    monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
+    monkeypatch.setattr(cli.httpx, "Client", github_client)
+
+    def no_task(*_: object) -> None:
+        return None
+
+    def repaired(*_: object) -> str:
+        return "repair: o/r#9 agent:review fixed"
+
+    monkeypatch.setattr(cli, "run_live", no_task)
+    monkeypatch.setattr(cli, "repair_next", repaired)
+    assert cli.main(["once"]) == 0
+    assert (
+        capsys.readouterr().out.splitlines()[-1] == "repair: o/r#9 agent:review fixed"
+    )

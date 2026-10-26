@@ -5,13 +5,15 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 
-from agent_dispatcher.dispatcher import Cycle, Plan
+from agent_dispatcher.dispatcher import Cycle, Plan, choose_team
 from agent_dispatcher.execute import Outcome, Provider, Run
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import GitHubReader
+from agent_dispatcher.intake import Issue
 from agent_dispatcher.providers import (
     ChatApi,
     ClaudeCli,
@@ -24,8 +26,9 @@ from agent_dispatcher.providers import (
     subprocess_runner,
 )
 from agent_dispatcher.publish import GitHubWriter
-from agent_dispatcher.queue import RunQueue
+from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.quota import Quota
+from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import State, state_of
 from agent_dispatcher.workspace import Workspace
@@ -109,6 +112,55 @@ def triage(
     return lambda system, user: model.complete(system, user, client)
 
 
+# One CI repair per agent PR: if that doesn't fix it, a human should look.
+MAX_CI_REPAIRS = 1
+
+
+def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
+    settings: Settings,
+    issue: Issue,
+    *,
+    run_id: int,
+    team: Team,
+    client: httpx.Client,
+    root: Path,
+) -> Run:
+    """Assemble a run with this host's adapters, git and GitHub access."""
+    return Run(
+        issue=issue,
+        state=state_of(issue.labels) or State.READY,
+        run_id=run_id,
+        team=team,
+        providers=providers(settings),
+        workspace=Workspace(root, subprocess_runner, os.environ),
+        writer=GitHubWriter(subprocess_runner, os.environ, root),
+        limits=Limits(settings.max_files, settings.max_lines),
+        triage=triage(settings, client),
+        ladder=settings.thinking_ladder,
+    )
+
+
+def work_root(settings: Settings) -> Path:
+    """Return the directory for clones, creating it if needed."""
+    root = settings.work_root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def finish(
+    queue: RunQueue,
+    run_id: int,
+    outcome: Outcome,
+    settings: Settings,
+    started: datetime,
+) -> None:
+    """Record how a run ended and park a provider that ran out."""
+    queue.finish_run(run_id, outcome.state.name.lower(), datetime.now(UTC))
+    if outcome.parked is not None:
+        until = outcome.resets_at or started + timedelta(hours=settings.park_hours)
+        queue.park(outcome.parked, until)
+
+
 def run_live(
     plan: Plan,
     settings: Settings,
@@ -121,30 +173,63 @@ def run_live(
         return None
     task, team = plan.next_task, plan.team
     issue = reader.issue(task.repo, task.number)
-    root = settings.work_root.resolve()
-    root.mkdir(parents=True, exist_ok=True)
+    root = work_root(settings)
     now = datetime.now(UTC)
     run_id = queue.start_run(task, "+".join(team.members()), now)
     outcome = Outcome(State.FAILED, "controller error")
     try:
-        outcome = Run(
-            issue=issue,
-            state=state_of(issue.labels) or State.READY,
-            run_id=run_id,
-            team=team,
-            providers=providers(settings),
-            workspace=Workspace(root, subprocess_runner, os.environ),
-            writer=GitHubWriter(subprocess_runner, os.environ, root),
-            limits=Limits(settings.max_files, settings.max_lines),
-            triage=triage(settings, client),
-            ladder=settings.thinking_ladder,
+        outcome = make_run(
+            settings, issue, run_id=run_id, team=team, client=client, root=root
         ).execute()
     finally:
-        queue.finish_run(run_id, outcome.state.name.lower(), datetime.now(UTC))
-    if outcome.parked is not None:
-        until = outcome.resets_at or now + timedelta(hours=settings.park_hours)
-        queue.park(outcome.parked, until)
+        finish(queue, run_id, outcome, settings, now)
     return outcome
+
+
+def repair_next(
+    settings: Settings,
+    reader: GitHubReader,
+    queue: RunQueue,
+    client: httpx.Client,
+) -> str | None:
+    """Repair the first agent PR whose blocking checks failed, once per PR."""
+    now = datetime.now(UTC)
+    known = quotas(configured(settings), queue.parked_until())
+    team = choose_team(known, settings.max_weekly_share, now)
+    if team is None:
+        return None
+    for repo in settings.repos:
+        for pr in reader.agent_prs(repo):
+            if queue.repairs(repo, pr.number) >= MAX_CI_REPAIRS:
+                continue
+            failed = reader.failed_checks(repo, pr.sha)
+            if not failed:
+                continue
+            root = work_root(settings)
+            writer = GitHubWriter(subprocess_runner, os.environ, root)
+            logs = "\n\n".join(
+                f"### {check.name}\n{writer.failed_log(repo, check.job_id)}"
+                for check in failed[:3]
+            )
+            issue = reader.issue(repo, pr.issue)
+            task = Task(repo, pr.issue, issue.title)
+            run_id = queue.start_run(task, "+".join(team.members()), now)
+            outcome = Outcome(State.FAILED, "controller error")
+            try:
+                run = make_run(
+                    settings,
+                    issue,
+                    run_id=run_id,
+                    team=team,
+                    client=client,
+                    root=root,
+                )
+                outcome = run.repair(pr, logs)
+            finally:
+                finish(queue, run_id, outcome, settings, now)
+                queue.record_repair(repo, pr.number, pr.sha, outcome.state.name, now)
+            return f"repair: {repo}#{pr.number} {outcome.state} {outcome.detail}"
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -174,6 +259,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 outcome = run_live(plan, settings, reader, queue, client)
                 if outcome is not None:
                     sys.stdout.write(f"result: {outcome.state} {outcome.detail}\n")
+                else:
+                    repaired = repair_next(settings, reader, queue, client)
+                    if repaired is not None:
+                        sys.stdout.write(f"{repaired}\n")
     finally:
         queue.close()
     return 0
