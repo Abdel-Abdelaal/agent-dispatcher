@@ -52,15 +52,15 @@ comment show why.
 Nothing reaches the file before these rules apply:
 
 1. **Credentials are scrubbed.** Every credential the controller holds (GitHub token,
-   Claude token, MiMo and NVIDIA keys), plus common token shapes, is replaced with
-   `[REDACTED]` in every string field.
+    Claude token, MiMo and NVIDIA keys), plus common token shapes, is replaced with
+    `[REDACTED]` in every string field.
 2. **Excerpts need a scanner.** An output excerpt is kept only after the trusted
-   scanner at `DISPATCHER_OUTPUT_SCANNER` has passed it. That's an absolute path to
-   a CLI that reads text on stdin, prints the scanned text and exits 0.
+    scanner at `DISPATCHER_OUTPUT_SCANNER` has passed it. That's an absolute path to
+    a CLI that reads text on stdin, prints the scanned text and exits 0.
 3. **Hash and length always stay.** Without a scanner, or if it fails, the excerpt
-   is `null` and `excerpt_status` says why.
+    is `null` and `excerpt_status` says why.
 4. **Private permissions.** The spool directory is created `700` and the file `600`.
-   On Windows that only sets read-only; the file inherits the user profile's ACLs.
+    On Windows that only sets read-only; the file inherits the user profile's ACLs.
 
 | `excerpt_status` | Meaning |
 | --- | --- |
