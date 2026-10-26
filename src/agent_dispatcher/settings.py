@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     max_lines: int = Field(default=400, gt=0)
     work_root: Path = Path("runs")
     park_hours: float = Field(default=5, gt=0)
+    disabled_providers: Annotated[
+        list[str], NoDecode, BeforeValidator(_split_repos)
+    ] = Field(default_factory=list)
     github_token: SecretStr | None = None
     claude_oauth_token: SecretStr | None = None
     # A trusted CLI (stdin to stdout) that scans excerpts before they're kept.

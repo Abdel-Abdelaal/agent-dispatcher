@@ -57,7 +57,7 @@ def configured(settings: Settings) -> list[str]:
     names = ["claude", "codex"]
     names += ["mimo"] if settings.mimo_api_key else []
     names += ["nvidia"] if settings.nvidia_api_key else []
-    return names
+    return [name for name in names if name not in settings.disabled_providers]
 
 
 def quotas(names: Sequence[str], parked: dict[str, datetime]) -> dict[str, Quota]:
@@ -108,11 +108,15 @@ def providers(settings: Settings) -> dict[str, Provider]:
             work=Tuning(settings.codex_work_model, settings.codex_work_effort)
         ),
     }
-    if settings.mimo_api_key:
+    if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         adapters["mimo"] = mimo_worker(settings.mimo_api_key)
     if settings.nvidia_api_key:
         adapters["nvidia"] = nvidia_worker(settings.nvidia_api_key)
-    return adapters
+    return {
+        name: adapter
+        for name, adapter in adapters.items()
+        if name in configured(settings)
+    }
 
 
 def triage(
@@ -120,9 +124,9 @@ def triage(
 ) -> Callable[[str, str], str] | None:
     """Return the cheapest chat model for triage: MiMo, else NVIDIA, else none."""
     chat: ChatApi | None = None
-    if settings.mimo_api_key:
+    if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         chat = mimo(settings.mimo_api_key)
-    elif settings.nvidia_api_key:
+    elif settings.nvidia_api_key and "nvidia" not in settings.disabled_providers:
         chat = nvidia(settings.nvidia_api_key)
     if chat is None:
         return None
@@ -132,7 +136,7 @@ def triage(
 
 def triage_model(settings: Settings) -> str | None:
     """Return the model triage uses, for telemetry."""
-    if settings.mimo_api_key:
+    if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         return mimo(settings.mimo_api_key).model
     if settings.nvidia_api_key:
         return nvidia(settings.nvidia_api_key).model

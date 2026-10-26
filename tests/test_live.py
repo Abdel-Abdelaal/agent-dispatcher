@@ -428,6 +428,20 @@ def test_configured_and_adapters_follow_the_keys() -> None:
         assert cli.triage(only_nvidia, client) is not None
 
 
+def test_disabled_thinker_is_never_selected() -> None:
+    settings = Settings(
+        disabled_providers=["claude"],
+        mimo_api_key=SecretStr("m"),
+        nvidia_api_key=None,
+    )
+    available = cli.configured(settings)
+    assert available == ["codex", "mimo"]
+    team = cli.choose_team(cli.quotas(available, {}), 0.6, datetime.now(UTC))
+    assert team is not None
+    assert team.planner == team.reviewer == "codex"
+    assert team.worker == "mimo"
+
+
 def test_triage_rating_sets_the_thinking_level(tmp_path: Path, origin: Path) -> None:
     planner, worker, reviewer = models([{"a.md": "x\n"}], [APPROVE])
     run = team_run(
