@@ -9,6 +9,6 @@ permissions: {}
 
 jobs:
   pr-title:
-    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/pr-title.yml@0b7cd6a33abb89db1743c91d3f11cf98179ebcd2 # v1.9.0
+    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/pr-title.yml@40b37ce9647cc6cde2adc3d3d1acfc0aa06f92c9 # v1.10.0
     permissions:
       pull-requests: read
