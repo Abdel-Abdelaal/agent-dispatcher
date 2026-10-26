@@ -8,6 +8,7 @@ from datetime import datetime
 # an unrecognised failure is a failed run, never a reason to retry at once.
 _EXHAUSTED = re.compile(
     r"usage limit|rate limit|quota (?:exceeded|exhausted)|limit reached"
+    r"|hit your (?:\w+ )?limit|out of (?:extra )?usage|limit \W+ resets"
     r"|insufficient_quota|\b429\b",
     re.IGNORECASE,
 )

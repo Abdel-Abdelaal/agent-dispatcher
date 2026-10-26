@@ -547,7 +547,7 @@ def test_a_ci_failure_is_repaired_on_the_same_branch(
     tmp_path: Path, origin: Path
 ) -> None:
     pr = published_pr(tmp_path, origin)
-    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n\nFixed.\n"}])
+    worker = FakeModel("claude", edits=[{"docs/api.md": "# API\n\nFixed.\n"}])
     reviewer = FakeModel("codex", [APPROVE])
     run, gh = repair_run(tmp_path, origin, worker, reviewer)
     outcome = run.repair(pr, "E501 line too long")
@@ -566,7 +566,7 @@ def test_a_rejected_repair_is_reported_and_not_pushed(
     tmp_path: Path, origin: Path
 ) -> None:
     pr = published_pr(tmp_path, origin)
-    worker = FakeModel("mimo", edits=[{"docs/api.md": "broken\n"}])
+    worker = FakeModel("claude", edits=[{"docs/api.md": "broken\n"}])
     run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex", [REJECT]))
     outcome = run.repair(pr, "log")
     assert outcome.state is State.FAILED
@@ -577,7 +577,7 @@ def test_a_rejected_repair_is_reported_and_not_pushed(
 
 def test_a_spent_worker_parks_quietly(tmp_path: Path, origin: Path) -> None:
     pr = published_pr(tmp_path, origin)
-    worker = FakeModel("mimo")
+    worker = FakeModel("claude")
     worker.exhausted = True
     worker.code = 1
     run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex"))
@@ -960,7 +960,7 @@ def test_an_unexpected_error_still_ends_in_a_final_state(
     repair = team_run(
         tmp_path / "work2",
         origin,
-        (FakeModel("claude"), Crashing("mimo"), FakeModel("codex")),
+        (Crashing("claude"), FakeModel("mimo"), FakeModel("codex")),
         gh2 := FakeGh(),
     )
     repair.run_id = 6
@@ -1091,3 +1091,34 @@ def test_out_of_turns_at_hard_fails_with_the_reason(
         "mimo failed while implementing (it ran out of turns even at the hard level).",
     )
     assert worker.turns == [40]
+
+
+def test_repair_does_not_wait_for_advisory_or_optional_checks() -> None:
+    runs = [
+        {
+            "name": "ci / Types",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": "x/job/7",
+        },
+        {
+            "name": "review / ai / Isolated analysis",
+            "status": "in_progress",
+            "conclusion": None,
+        },
+        {"name": "PR-Agent (advisory trial)", "status": "queued", "conclusion": None},
+    ]
+    reader = GitHubReader(pulls_client(runs))
+    assert reader.failed_checks("o/r", "abc", {"ci / Types"}) == [
+        FailedCheck("ci / Types", "7")
+    ]
+    still_running = [
+        *runs,
+        {"name": "ci / Test", "status": "in_progress", "conclusion": None},
+    ]
+    assert (
+        GitHubReader(pulls_client(still_running)).failed_checks(
+            "o/r", "abc", {"ci / Types", "ci / Test"}
+        )
+        is None
+    )
