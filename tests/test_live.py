@@ -1091,3 +1091,34 @@ def test_out_of_turns_at_hard_fails_with_the_reason(
         "mimo failed while implementing (it ran out of turns even at the hard level).",
     )
     assert worker.turns == [40]
+
+
+def test_repair_does_not_wait_for_advisory_or_optional_checks() -> None:
+    runs = [
+        {
+            "name": "ci / Types",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": "x/job/7",
+        },
+        {
+            "name": "review / ai / Isolated analysis",
+            "status": "in_progress",
+            "conclusion": None,
+        },
+        {"name": "PR-Agent (advisory trial)", "status": "queued", "conclusion": None},
+    ]
+    reader = GitHubReader(pulls_client(runs))
+    assert reader.failed_checks("o/r", "abc", {"ci / Types"}) == [
+        FailedCheck("ci / Types", "7")
+    ]
+    still_running = [
+        *runs,
+        {"name": "ci / Test", "status": "in_progress", "conclusion": None},
+    ]
+    assert (
+        GitHubReader(pulls_client(still_running)).failed_checks(
+            "o/r", "abc", {"ci / Types", "ci / Test"}
+        )
+        is None
+    )

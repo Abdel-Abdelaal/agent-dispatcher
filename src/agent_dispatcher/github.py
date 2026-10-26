@@ -156,15 +156,20 @@ class GitHubReader:
             timeout=30,
         )
         response.raise_for_status()
-        runs: list[dict[str, Any]] = response.json()["check_runs"]
+        runs: list[dict[str, Any]] = [
+            run
+            for run in response.json()["check_runs"]
+            if not run["name"].startswith(_ADVISORY)
+            and (required is None or run["name"] in required)
+        ]
+        # Only the checks that count are waited for: a slow advisory review must
+        # not hold up the repair of a required check that has already failed.
         if any(run["status"] != "completed" for run in runs):
             return None
         return [
             FailedCheck(run["name"], str(run.get("details_url", "")).rsplit("/", 1)[-1])
             for run in runs
             if run["conclusion"] in {"failure", "timed_out"}
-            and not run["name"].startswith(_ADVISORY)
-            and (required is None or run["name"] in required)
         ]
 
     def labelled_by(self, repo: str, number: int) -> str | None:
