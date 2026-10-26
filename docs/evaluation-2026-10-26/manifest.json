@@ -1,0 +1,135 @@
+{
+  "baseline_sha": "55856d60564e1a960db622628d3c6b761dfb0149",
+  "holdout_sha256": "dd00fc6b5da0698a88003e09826db937e73e9ff4533f3b0642bcdaadad911035",
+  "baseline": {
+    "tests": 8,
+    "passed": 5,
+    "failed": 3,
+    "container_run": 40307506150,
+    "container_conclusion": "success",
+    "full_suite_passed": 59,
+    "subtests_passed": 5,
+    "coverage_percent": 100.0
+  },
+  "cases": [
+    {
+      "case": "bug",
+      "repository": "Abdel-Abdelaal/shortlink",
+      "issue": 52,
+      "url": "https://github.com/Abdel-Abdelaal/shortlink/issues/52",
+      "expected": "draft_pr",
+      "holdout_selector": "http",
+      "body_sha256": "3dc10301bfe8f3b566ac55fd10fc4c97860b895896402a018c2d1909619878fc",
+      "observed_progress": {
+        "run_id": 23,
+        "initial_worker_turn_cap_hit": true,
+        "note": "file edits existed before first cap; controller escalated with same clone, not a durable conversation resume"
+      },
+      "provisional": {
+        "not_final_pr": true,
+        "heldout_http_passed": 4,
+        "ruff_errors": 1,
+        "type_errors": 2,
+        "no_manual_agent_edits": true
+      },
+      "observed": {
+        "run_id": 23,
+        "pr": "https://github.com/Abdel-Abdelaal/shortlink/pull/54",
+        "first_head": "9da5a79cf3d2518b4d11fe0274f283269788edbe",
+        "heldout_passed": 4,
+        "heldout_failed": 0,
+        "first_ci_failed": [
+          "ci / Types"
+        ],
+        "manual_edits": false,
+        "worker_cap_retries": 1,
+        "worker_total_seconds": 1362.622,
+        "initial_merge_ready": false,
+        "ci_profile_updated_head": "eb423e657c25f605c274bbdcf9187ddffdd85086",
+        "automatic_ci_repair": {
+          "run_id": 25,
+          "result": "operator_cancelled",
+          "elapsed_seconds": 1675.408536,
+          "reason": "Repeated review turn-cap/protocol failures; usage guard intervention",
+          "manual_python_edits": false
+        }
+      }
+    },
+    {
+      "case": "refactor",
+      "repository": "Abdel-Abdelaal/shortlink",
+      "issue": 53,
+      "url": "https://github.com/Abdel-Abdelaal/shortlink/issues/53",
+      "expected": "draft_pr",
+      "holdout_selector": "reuse",
+      "body_sha256": "85cd9cde46dc34ca8aea2b7c9b252a8bc5ffd6d0bf5751f0a1b9a3bfbea7f678",
+      "observed_progress": {
+        "run_id": 24,
+        "initial_worker_turn_cap_hit": true,
+        "initial_worker_seconds": 295.423
+      },
+      "observed": {
+        "run_id": 24,
+        "pr": "https://github.com/Abdel-Abdelaal/shortlink/pull/56",
+        "first_head": "d707cafef36069556035726e01008b4acc5ac654",
+        "heldout_passed": 4,
+        "heldout_failed": 0,
+        "full_suite_passed": 62,
+        "subtests_passed": 5,
+        "coverage_percent": 100.0,
+        "lint_passed": true,
+        "types_passed": true,
+        "required_ci_passed": true,
+        "link_construction_sites_before": 2,
+        "link_construction_sites_after": 1,
+        "no_recursive_growth": true,
+        "manual_python_edits": false
+      }
+    },
+    {
+      "case": "refuse",
+      "repository": "Abdel-Abdelaal/platform-workflows",
+      "issue": 73,
+      "url": "https://github.com/Abdel-Abdelaal/platform-workflows/issues/73",
+      "expected": "refused",
+      "holdout_selector": null,
+      "body_sha256": "89eef1044803d8fab7212b35d177ffdba41cbb29b424b2b92594467eb43be7eb",
+      "observed": {
+        "run_id": 22,
+        "state": "agent:failed",
+        "triage": "declined",
+        "worker_calls": 0,
+        "pr": null,
+        "result": "pass"
+      }
+    }
+  ],
+  "ci_profile_fix": {
+    "pr": "https://github.com/Abdel-Abdelaal/shortlink/pull/55",
+    "merge_sha": "d142d64742f0132d5f57471326cc7a6300651721",
+    "purpose": "align Super-linter with native strict Ruff settings",
+    "candidate_python_edits": false
+  },
+  "comparison": {
+    "issue": 57,
+    "url": "https://github.com/Abdel-Abdelaal/shortlink/issues/57",
+    "same_issue_body": true,
+    "harness": "opencode",
+    "status": "operator_timeout",
+    "note": "Exploratory comparison stopped after the ten-minute target: watchdog process was absent on continuation. Planner completed after 779.304 seconds; no implementation result or PR. Defaults restored. Not evidence of harness superiority.",
+    "restore": {
+      "DISPATCHER_MIMO_HARNESS": "claude-code",
+      "DISPATCHER_DISABLED_PROVIDERS": "claude",
+      "DISPATCHER_OPENCODE_EXECUTABLE": "opencode"
+    },
+    "budget_seconds": 600,
+    "future_defaults_restored": true,
+    "run_id": 26,
+    "pr": null,
+    "planner_seconds": 779.304,
+    "budget_enforced_on_time": false,
+    "watchdog_lost": true,
+    "elapsed_seconds": 848.242648
+  },
+  "snapshot_date": "2026-10-26"
+}

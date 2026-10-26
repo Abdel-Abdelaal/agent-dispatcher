@@ -1,0 +1,120 @@
+"""Independent acceptance checks frozen before the live agent evaluation."""
+
+import ast
+import asyncio
+import inspect
+import json
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+
+from shortlink.api.errors import handle_http_error
+from shortlink.domain.errors import CodeTakenError
+from shortlink.domain.models import Link
+from shortlink.domain.service import MAX_CODE_ATTEMPTS, LinkService
+
+NOW = datetime(2026, 10, 26, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("status", [499, 599, 404])
+def test_http_status_preserved(status):
+    request = Request({"type": "http", "method": "GET", "path": "/held-out", "headers": [], "scheme": "https", "server": ("evaluation.invalid", 443)})
+    response = asyncio.run(handle_http_error(
+        request, HTTPException(status, "held-out detail", {"X-Trace": "held-out"})
+    ))
+    body = json.loads(response.body)
+    assert response.status_code == body["status"] == status
+    assert body["detail"] == "held-out detail"
+    assert body["instance"] == "/held-out"
+    assert isinstance(body["title"], str) and body["title"].strip()
+    assert response.headers["x-trace"] == "held-out"
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_http_unrelated_error_not_swallowed():
+    request = Request({"type": "http", "method": "GET", "path": "/held-out", "headers": [], "scheme": "https", "server": ("evaluation.invalid", 443)})
+    error = RuntimeError("held-out")
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(handle_http_error(request, error))
+    assert caught.value is error
+
+
+class Repository:
+    def __init__(self):
+        self.links = {}
+        self.calls = 0
+
+    def add(self, link):
+        self.calls += 1
+        if link.code in self.links:
+            raise CodeTakenError
+        self.links[link.code] = link
+
+    def get(self, code):
+        return self.links[code]
+
+    def increment_hits(self, code):
+        link = self.get(code)
+        self.links[code] = replace(link, hits=link.hits + 1)
+
+    def delete(self, code):
+        del self.links[code]
+
+
+def test_reuse_preserves_custom_collision_without_retry():
+    repository = Repository()
+    clock = Mock()
+    clock.now.return_value = NOW
+    service = LinkService(repository, clock)
+    service.create("https://example.com/old", "taken12")
+    with patch("shortlink.domain.service.generate_code") as generator:
+        with pytest.raises(CodeTakenError):
+            service.create("https://example.com/new", "taken12")
+        generator.assert_not_called()
+    assert repository.calls == 2
+    assert repository.links["taken12"].target_url == "https://example.com/old"
+
+
+def test_reuse_preserves_bounded_retries_without_recursive_growth():
+    repository = Repository()
+    clock = Mock()
+    clock.now.return_value = NOW
+    service = LinkService(repository, clock)
+    service.create("https://example.com/old", "taken12")
+    depths = []
+    def collision(_length):
+        depths.append(len(inspect.stack()))
+        return "taken12"
+    with patch("shortlink.domain.service.generate_code", side_effect=collision):
+        with pytest.raises(CodeTakenError):
+            service.create("https://example.com/new")
+    assert len(depths) == MAX_CODE_ATTEMPTS
+    assert max(depths) == min(depths)
+    assert repository.calls == 1 + MAX_CODE_ATTEMPTS
+    assert clock.now.call_count == 2
+
+
+def test_reuse_preserves_reserved_retry_then_success():
+    repository = Repository()
+    clock = Mock()
+    clock.now.return_value = NOW
+    service = LinkService(repository, clock)
+    with patch("shortlink.domain.service.generate_code", side_effect=["health", "fresh12"]):
+        link = service.create("https://example.com/new")
+    assert isinstance(link, Link)
+    assert link.code == "fresh12" and link.created_at == NOW
+    assert repository.calls == 1
+    clock.now.assert_called_once()
+
+
+def test_reuse_has_one_link_construction_site():
+    import shortlink.domain.service as module
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    sites = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == "Link"]
+    assert len(sites) == 1
