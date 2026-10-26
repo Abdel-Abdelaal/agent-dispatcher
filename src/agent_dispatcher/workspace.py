@@ -46,10 +46,11 @@ class Workspace:
             raise GitError(message)
         return stdout
 
-    def clone(self, url: str, name: str) -> Path:
-        """Shallow-clone `url` into a new directory under the root."""
+    def clone(self, url: str, name: str, branch: str | None = None) -> Path:
+        """Shallow-clone `url` (at `branch`, if given) into a new directory."""
         destination = self._root / name
-        self._git(self._root, "clone", "--depth", "1", "--no-tags", url, name)
+        chosen = ["--branch", branch] if branch else []
+        self._git(self._root, "clone", "--depth", "1", "--no-tags", *chosen, url, name)
         return destination
 
     def default_branch(self, clone: Path) -> str:
@@ -80,3 +81,8 @@ class Workspace:
         self._git(clone, "checkout", "-b", branch)
         self._git(clone, "commit", "--no-verify", "--file", "-", stdin=message)
         self._git(clone, "push", "--no-verify", "origin", branch)
+
+    def push_update(self, clone: Path, branch: str, message: str) -> None:
+        """Commit the applied patch on top of an existing branch and push it."""
+        self._git(clone, "commit", "--no-verify", "--file", "-", stdin=message)
+        self._git(clone, "push", "--no-verify", "origin", f"HEAD:refs/heads/{branch}")
