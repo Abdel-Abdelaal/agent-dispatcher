@@ -601,8 +601,12 @@ class Run:
             f"{REPAIR_CI}\n{_fenced('CI_LOG', logs)}\n{untrusted_block(self.issue)}\n"
         )
         self.branch = pr.branch
+        # A failing check names exact files and lines, which a thinker fixes in one
+        # pass. Workers can't run the linters to check themselves and were seen to
+        # loop for 20+ minutes on four lint errors, so the planner repairs CI and
+        # the other thinker reviews. CI repairs are rare, so this costs little.
         self._step(
-            self.team.worker,
+            self.team.planner,
             "repairing CI",
             prompt,
             agent_clone,
