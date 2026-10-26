@@ -7,9 +7,7 @@ from datetime import datetime
 from agent_dispatcher.intake import Issue, accepts
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.quota import Quota, allows
-
-# Phase 1 routes coding to Claude and falls back to Codex when Claude is parked.
-CODING_ORDER = ("claude", "codex")
+from agent_dispatcher.roles import Team, form_team
 
 
 @dataclass(frozen=True)
@@ -19,18 +17,16 @@ class Plan:
     queued: list[Issue]
     ignored: list[Issue]
     next_task: Task | None
-    provider: str | None
+    team: Team | None
 
 
-def choose_provider(
+def choose_team(
     quotas: Mapping[str, Quota], max_share: float, now: datetime
-) -> str | None:
-    """Return the first coding provider whose quota allows a run, or None to park."""
-    for name in CODING_ORDER:
-        quota = quotas.get(name)
-        if quota is not None and allows(quota, max_share, now):
-            return name
-    return None
+) -> Team | None:
+    """Return the team for the next run; providers missing from `quotas` are off."""
+    return form_team(
+        lambda name: name in quotas and allows(quotas[name], max_share, now)
+    )
 
 
 @dataclass(frozen=True)
@@ -54,5 +50,5 @@ class Cycle:
                 elif self.queue.enqueue(issue, now):
                     queued.append(issue)
         task = self.queue.next_task()
-        provider = choose_provider(quotas, self.max_share, now) if task else None
-        return Plan(queued, ignored, task, provider)
+        team = choose_team(quotas, self.max_share, now) if task else None
+        return Plan(queued, ignored, task, team)

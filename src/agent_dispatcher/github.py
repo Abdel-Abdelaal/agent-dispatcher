@@ -49,6 +49,22 @@ class GitHubReader:
             if "pull_request" not in row
         ]
 
+    def issue(self, repo: str, number: int) -> Issue:
+        """Return one issue as it is now, for a task queued in an earlier cycle."""
+        response = self._client.get(
+            f"{API}/repos/{repo}/issues/{number}", headers=self._headers, timeout=30
+        )
+        response.raise_for_status()
+        row = response.json()
+        return Issue(
+            repo=repo,
+            number=number,
+            title=row["title"],
+            body=row.get("body") or "",
+            labels=tuple(label["name"] for label in row["labels"]),
+            labelled_by=self.labelled_by(repo, number),
+        )
+
     def labelled_by(self, repo: str, number: int) -> str | None:
         """Return who most recently added the ready label, from the issue events."""
         events = self._get(f"/repos/{repo}/issues/{number}/events", {"per_page": 100})

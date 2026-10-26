@@ -11,17 +11,38 @@ fleet's normal required checks, and Abdel merges by hand.
 
 ## Status
 
-Phase 1 skeleton. The controller runs in **dry-run only**: it polls, queues and plans,
-but doesn't call a model or open a PR until the owner setup below is done.
+Phase 3 routing on the laptop, which stands in for the VPS until the move. `once`
+runs the next task with a team; `once --dry-run` only plans.
+
+## Who does what
+
+Claude and Codex are the strongest models with the smallest allowances, so they
+only think: short, read-only plan and review steps. MiMo and NVIDIA have the
+largest allowances, so they do the token-heavy implementation.
+
+| Step | Role | Provider, in order of preference | Harness |
+| --- | --- | --- | --- |
+| Triage | cheap screen | MiMo, else NVIDIA (chat API, JSON verdict) | HTTP |
+| Plan | thinker, read-only | Claude, else Codex | Claude Code / Codex CLI |
+| Implement | worker | MiMo, else NVIDIA, else a thinker as a last resort | Claude Code on MiMo's Anthropic API / OpenCode on NVIDIA's OpenAI API |
+| Gate | controller | protected paths, diff size, test deletions, symlinks | Git |
+| Review | the other thinker, read-only | Codex if Claude planned, and the reverse | Codex CLI / Claude Code |
+| Repair | worker | one round on the reviewer's findings, then gate and review again | as above |
+
+A provider that reports its limit is parked until the time it gives (Codex prints
+one) or for `DISPATCHER_PARK_HOURS`, and the next run forms a team without it.
+Without any thinker the task waits. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY`
+is set.
 
 | Piece | State |
 | --- | --- |
-| Label state machine and SQLite run queue with a single-run lock | built, tested |
-| Owner-only intake and issue-text sanitiser | built, tested |
-| Provider adapters: `claude -p`, `codex exec`, MiMo and NVIDIA (OpenAI-compatible) | built, tested with fakes; no live call yet |
-| Quota guard (weekly share and reset times) | built, tested; headless usage reading unverified |
-| Protected-path and diff-size gate | built, tested; not yet wired to a real run |
-| GitHub App for draft PRs, Claude `setup-token`, Codex 0.162.1, NVIDIA key | owner setup pending |
+| Label state machine, SQLite queue, single-run lock, owner-only intake | built, tested |
+| Live run: two clones, gate on the clean one, draft PR through `gh` | built, live-tested |
+| Claude (plan, review) on its CLI login | built, live-tested |
+| Codex (plan, review) on its ChatGPT login | built, tested with fakes |
+| MiMo (triage, implement) through Claude Code | built, harness live-tested |
+| NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
+| GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ## Install
 
@@ -36,10 +57,30 @@ cp .env.example .env   # then fill in values; never commit .env
 
 ```sh
 uv run agent-dispatcher once --dry-run   # one poll cycle, prints the plan
+uv run agent-dispatcher once             # also runs the next task
 ```
 
 Issues count only if the `agent:ready` label was added by `DISPATCHER_OWNER`.
 The queue lives in `DISPATCHER_DB_PATH`; see `.env.example` for every setting.
+
+A live run:
+
+1. Labels the issue `agent:running`.
+2. Clones the repository twice under `DISPATCHER_WORK_ROOT`.
+3. Runs the provider in the first clone with the issue as untrusted data.
+4. Applies only the resulting diff to the second, clean clone and gates it there.
+5. Pushes from the clean clone with Git hooks disabled, opens a draft PR and
+    labels the issue `agent:review`.
+
+A refused or failed run gets `agent:failed` and a comment with the reason. An
+exhausted provider gets `agent:parked` and is retried after `DISPATCHER_PARK_HOURS`.
+
+The agent never pushes or holds a GitHub token. It can write anything in its own
+clone, `.git/hooks` and `.git/config` included, so nothing is pushed from there.
+Claude runs with `--setting-sources local`. That ignores user settings (which may
+point Claude Code at another provider) and the repository's own
+`.claude/settings.json`, whose hooks would otherwise run. Until the agent runs in
+a sandbox it gets no Bash: it edits files, and CI runs the tests.
 
 ## Validate
 

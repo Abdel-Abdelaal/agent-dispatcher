@@ -22,14 +22,17 @@ the controller (not the agent) decides what becomes a PR.
   only if the owner added that label: anyone can write an issue body.
 - **Queue.** SQLite holds tasks and runs. A partial unique index allows at most
   one unfinished run, so a crash or a second process can't start a parallel one.
-- **Route.** Claude first, Codex if Claude is over its share or exhausted, park
-  otherwise. MiMo and NVIDIA do triage and advisory review, not coding.
+- **Route.** A team per task: a thinker (Claude, else Codex) plans read-only, a
+  worker (MiMo, else NVIDIA) implements, and the other thinker reviews read-only.
+  Thinkers have the smallest allowances, so they only do short steps.
 - **Run.** The prompt goes on stdin, with the issue inside a delimited untrusted
   block after removing HTML comments, `<details>` blocks and invisible characters.
 - **Gate.** The controller reads the diff itself and refuses protected paths,
   binary files, test deletions, paths outside the repository and oversized diffs.
-- **Publish.** A draft PR from the App, then the fleet's required checks, then
-  Abdel merges.
+- **Review.** The second thinker reads the issue, plan and gated diff and returns
+  a JSON verdict. A rejection gets one repair round by the worker.
+- **Publish.** A draft PR (from the App once on the VPS), then the fleet's
+  required checks, then Abdel merges.
 
 ## States
 
@@ -54,9 +57,9 @@ edit there would run code on every later run.
 | Phase | Scope | State |
 | --- | --- | --- |
 | 0 | Owner setup: CLI logins, Codex 0.162.1, NVIDIA key, GitHub App | pending |
-| 1 | This skeleton, then live Claude runs on `shortlink` docs and test tasks | skeleton done |
+| 1 | Skeleton, then live Claude runs on `shortlink` docs and test tasks | live runs built |
 | 2 | Controller-run verifiers, repro-first bug check, red-team issue attacks | planned |
-| 3 | Codex as second implementer, cross-vendor review, MiMo/GLM triage | planned |
+| 3 | Thinker/worker teams, cross-vendor review, MiMo/GLM triage and implementation | built |
 | 4 | Fleet rollout by language, funnel metrics in the signed telemetry | planned |
 
 The full research, with sources, is in the agent platform design report kept
