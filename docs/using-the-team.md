@@ -73,7 +73,8 @@ new public repos still need fleet enrollment/checks before coverage is assumed.
 The native UI loads [shared project context](assistant-context.md) and approved
 notes. It does not inherit other assistants' full histories or every tool. Native
 sessions, prompts, tool outputs and usage persist locally under
-`runs/native-opencode` and are resumed on the next launch with `--continue`.
+`runs/native-opencode`. The launcher resumes the latest valid session by ID;
+an empty profile opens the normal home screen without attempting a resume.
 Sharing is disabled. These confidential native session records are not published
 or currently ingested into the public dashboard. The controller bridge also keeps
 hashes/outcomes locally in `runs/assistant-telemetry`. This replaces the old
