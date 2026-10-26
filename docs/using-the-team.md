@@ -43,9 +43,9 @@ availability. A signed suggestion can be wrong; the agent may decline it.
 On Abdel's configured laptop, run `mimo` and describe what you want normally:
 
 > I'm not sure which repo needs attention. Look at my projects and suggest a task.
-
+>
 > Fix duplicate aliases in shortlink, add a regression test and open a draft PR.
-
+>
 > Create a private repo called garden-notes for a gardening project.
 
 The conversational assistant can discover public projects, inspect files, issues
