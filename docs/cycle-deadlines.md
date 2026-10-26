@@ -27,11 +27,12 @@ can still escalate within their existing limits while retaining file changes.
 No deadline failure automatically requeues a task. The owner must deliberately
 authorize a retry after inspecting the failure.
 
-The MiMo OpenCode worker now explicitly disables thinking and auxiliary providers,
-matching the native UI's verified request format. Its previous exploratory
+The MiMo OpenCode worker keeps reasoning enabled by default and permits an
+explicit non-reasoning comparison using `DISPATCHER_MIMO_REASONING=disabled`.
+Auxiliary providers remain disabled. Its previous exploratory
 measurement remains failed. A separate bounded file-tool smoke completed correctly
 in14.922 seconds with zero reported reasoning tokens; this verifies the adapter,
-not general application quality. The HEAD application task is evaluated separately.
+not general application quality or evidence that disabling reasoning is better. The HEAD application task is evaluated separately.
 
 Valid Conventional task titles are preserved instead of receiving a second
 `chore:` prefix. Bug/enhancement/documentation labels provide a fallback type.

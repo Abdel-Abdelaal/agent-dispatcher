@@ -113,7 +113,11 @@ def providers(settings: Settings) -> dict[str, Provider]:
     }
     if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         adapters["mimo"] = (
-            MiMoOpenCode(settings.mimo_api_key, settings.opencode_executable)
+            MiMoOpenCode(
+                settings.mimo_api_key,
+                settings.opencode_executable,
+                reasoning=settings.mimo_reasoning,
+            )
             if settings.mimo_harness == "opencode"
             else mimo_worker(settings.mimo_api_key)
         )
