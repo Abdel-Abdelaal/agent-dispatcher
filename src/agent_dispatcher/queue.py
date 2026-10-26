@@ -50,6 +50,19 @@ class Task:
     title: str
 
 
+@dataclass(frozen=True)
+class RunRecord:
+    """One past or active run, as recorded."""
+
+    id: int
+    repo: str
+    number: int
+    team: str
+    started_at: str
+    finished_at: str | None
+    outcome: str | None
+
+
 class RunActiveError(RuntimeError):
     """Another run hasn't finished; runs are strictly serial."""
 
@@ -76,18 +89,8 @@ class RunQueue:
 
     def next_task(self) -> Task | None:
         """Return the oldest task with no run yet, or whose runs were all parked."""
-        row = self._db.execute(
-            """
-            SELECT t.repo, t.number, t.title FROM tasks t
-            WHERE NOT EXISTS (
-                SELECT 1 FROM runs r
-                WHERE r.repo = t.repo AND r.number = t.number
-                AND (r.outcome IS NULL OR r.outcome != 'parked')
-            )
-            ORDER BY t.queued_at, t.repo, t.number LIMIT 1
-            """
-        ).fetchone()
-        return Task(*row) if row else None
+        tasks = self.waiting()
+        return tasks[0] if tasks else None
 
     def start_run(self, task: Task, provider: str, now: datetime) -> int:
         """Record a run start, or raise if one is already active."""
@@ -136,3 +139,27 @@ class RunQueue:
             "INSERT INTO repairs VALUES (?, ?, ?, ?, ?)",
             (repo, pr, sha, outcome, now.isoformat()),
         )
+
+    def waiting(self) -> list[Task]:
+        """Return queued tasks with no run yet, or whose runs were all parked."""
+        rows = self._db.execute(
+            """
+            SELECT t.repo, t.number, t.title FROM tasks t
+            WHERE NOT EXISTS (
+                SELECT 1 FROM runs r
+                WHERE r.repo = t.repo AND r.number = t.number
+                AND (r.outcome IS NULL OR r.outcome != 'parked')
+            )
+            ORDER BY t.queued_at, t.repo, t.number
+            """
+        )
+        return [Task(*row) for row in rows]
+
+    def recent_runs(self, limit: int = 10) -> list[RunRecord]:
+        """Return the most recent runs, newest first."""
+        rows = self._db.execute(
+            "SELECT id, repo, number, provider, started_at, finished_at, outcome"
+            " FROM runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [RunRecord(*row) for row in rows]

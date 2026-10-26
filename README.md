@@ -79,6 +79,13 @@ read-only review by a thinker, then is pushed to that branch, and the result is
 commented on the PR. Advisory checks (`review / ai`) never trigger a repair. A PR is
 repaired at most once: if that doesn't fix it, a human should look.
 
+### Driving it from Claude
+
+`skills/agent-dispatcher/SKILL.md` is an [Agent Skill](https://docs.claude.com/en/docs/claude-code/skills)
+that teaches any Claude Code session to file tasks, read `agent-dispatcher status`
+and the run log, explain failures and change models or repositories safely.
+Install it by copying the folder to `~/.claude/skills/`.
+
 ## Install
 
 Python 3.12 and [uv](https://docs.astral.sh/uv/).
@@ -93,6 +100,7 @@ cp .env.example .env   # then fill in values; never commit .env
 ```sh
 uv run agent-dispatcher once --dry-run   # one poll cycle, prints the plan
 uv run agent-dispatcher once             # also runs the next task
+uv run agent-dispatcher status           # waiting tasks, parked models, recent runs
 ```
 
 Issues count only if the `agent:ready` label was added by `DISPATCHER_OWNER`.

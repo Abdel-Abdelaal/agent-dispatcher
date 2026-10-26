@@ -157,3 +157,30 @@ def test_cli_repairs_when_no_task_is_waiting(
     assert (
         capsys.readouterr().out.splitlines()[-1] == "repair: o/r#9 agent:review fixed"
     )
+
+
+def test_status_shows_waiting_parked_and_recent_runs(tmp_path: Path) -> None:
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    queue.enqueue(Issue("o/r", 1, "first", "", ("agent:ready",), "owner"), NOW)
+    queue.enqueue(Issue("o/r", 2, "second", "", ("agent:ready",), "owner"), NOW)
+    run = queue.start_run(Task("o/r", 2, "second"), "claude+mimo", NOW)
+    queue.finish_run(run, "review", NOW)
+    queue.park("codex", datetime(2026, 10, 26, tzinfo=UTC))
+    queue.park("mimo", datetime(2026, 10, 24, tzinfo=UTC))
+    assert cli.status(queue, NOW).splitlines() == [
+        "waiting: 1",
+        "  o/r#1 first",
+        "parked: 1",
+        "  codex until 2026-10-26T00:00+00:00",
+        "recent runs: 1",
+        "  run 1 o/r#2 [claude+mimo] review 2026-10-25T12:00",
+    ]
+    queue.close()
+
+
+def test_cli_status_needs_no_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
+    assert cli.main(["status"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "waiting: 0"
