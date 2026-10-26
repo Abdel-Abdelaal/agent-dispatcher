@@ -131,6 +131,14 @@ def _result(name: str, code: int, stdout: str, text: str, error: str) -> RunResu
 
 
 @dataclass(frozen=True)
+class Tuning:
+    """A model and effort level for one kind of step."""
+
+    model: str
+    effort: str
+
+
+@dataclass(frozen=True)
 class Gateway:
     """An Anthropic-compatible endpoint that Claude Code drives instead of Claude.
 
@@ -162,10 +170,11 @@ class ClaudeCli:
 
     oauth_token: SecretStr | None = None
     gateway: Gateway | None = None
+    work: Tuning | None = None
     max_turns: int = 40
     name: str = "claude"
 
-    def argv(self, *, read_only: bool) -> list[str]:
+    def argv(self, *, read_only: bool, tuning: Tuning | None = None) -> list[str]:
         """Return the command line; the prompt goes on stdin.
 
         `--setting-sources local` skips user settings (which may route Claude Code
@@ -187,16 +196,20 @@ class ClaudeCli:
             "--disallowedTools",
             _DENY_READ_ONLY if read_only else _DENY_EDITING,
         ]
+        tuning = tuning or (None if read_only else self.work)
         if self.gateway is not None:
             argv += ["--model", self.gateway.model]
+        elif tuning is not None:
+            argv += ["--model", tuning.model, "--effort", tuning.effort]
         return argv
 
-    def run(
+    def run(  # noqa: PLR0913 - the runner and environment are test seams
         self,
         prompt: str,
         worktree: Path,
         *,
         read_only: bool = False,
+        tuning: Tuning | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -206,9 +219,8 @@ class ClaudeCli:
             env.update(self.gateway.env())
         elif self.oauth_token is not None:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self.oauth_token.get_secret_value()
-        code, stdout, stderr = runner(
-            self.argv(read_only=read_only), worktree, prompt, env
-        )
+        argv = self.argv(read_only=read_only, tuning=tuning)
+        code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, is_error = _claude_json(stdout)
         code = code or int(is_error)
         return _result(self.name, code, stdout, text, text if is_error else stderr)
@@ -239,11 +251,18 @@ def _codex_events(stdout: str) -> tuple[str, str]:
 class CodexCli:
     """Codex in exec mode, on the ChatGPT-plan login. Never inside GitHub Actions."""
 
+    work: Tuning | None = None
     name: str = "codex"
 
-    def argv(self, worktree: Path, *, read_only: bool) -> list[str]:
-        """Return the command line; `-` makes Codex read the prompt from stdin."""
-        return [
+    def argv(
+        self, worktree: Path, *, read_only: bool, tuning: Tuning | None = None
+    ) -> list[str]:
+        """Return the command line; `-` makes Codex read the prompt from stdin.
+
+        An explicit model and effort keep the dispatcher independent of the
+        desktop app's `config.toml`, which would otherwise decide both.
+        """
+        argv = [
             "codex",
             "exec",
             "--json",
@@ -251,15 +270,20 @@ class CodexCli:
             "read-only" if read_only else "workspace-write",
             "--cd",
             str(worktree),
-            "-",
         ]
+        tuning = tuning or (None if read_only else self.work)
+        if tuning is not None:
+            argv += ["--model", tuning.model]
+            argv += ["--config", f"model_reasoning_effort={tuning.effort}"]
+        return [*argv, "-"]
 
-    def run(
+    def run(  # noqa: PLR0913 - the runner and environment are test seams
         self,
         prompt: str,
         worktree: Path,
         *,
         read_only: bool = False,
+        tuning: Tuning | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -268,7 +292,7 @@ class CodexCli:
             message = "Codex subscription runs are for the controller host only"
             raise TermsError(message)
         env = scrubbed_env(environ, ("CODEX_HOME",))
-        argv = self.argv(worktree, read_only=read_only)
+        argv = self.argv(worktree, read_only=read_only, tuning=tuning)
         code, stdout, stderr = runner(argv, worktree, prompt, env)
         text, errors = _codex_events(stdout)
         code = code or int(bool(errors))
@@ -310,12 +334,13 @@ class OpenCodeCli:
             }
         )
 
-    def run(
+    def run(  # noqa: PLR0913 - the runner and environment are test seams
         self,
         prompt: str,
         worktree: Path,
         *,
         read_only: bool = False,
+        tuning: Tuning | None = None,
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] = os.environ,
     ) -> RunResult:
@@ -324,6 +349,7 @@ class OpenCodeCli:
         On Windows, untrusted text in the arguments of a `.cmd` shim can inject
         commands, so the issue text only ever travels in a file.
         """
+        del tuning  # NVIDIA's model is fixed; it never thinks for the team.
         prompt_file = worktree.parent / f"{worktree.name}.prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
         env = scrubbed_env(environ)

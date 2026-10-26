@@ -16,7 +16,8 @@ from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import Outcome, Provider, Run, json_reply, pr_title
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.intake import Issue
-from agent_dispatcher.providers import RunResult, subprocess_runner
+from agent_dispatcher.levels import DEFAULT_LADDER, Level
+from agent_dispatcher.providers import ClaudeCli, RunResult, Tuning, subprocess_runner
 from agent_dispatcher.publish import GitHubWriter, PublishError
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
@@ -74,6 +75,7 @@ class FakeModel:
         self.replies = replies or []
         self.edits = edits or []
         self.prompts: list[tuple[str, bool]] = []
+        self.tunings: list[Tuning | None] = []
         self.code = 0
         self.exhausted = False
 
@@ -81,8 +83,16 @@ class FakeModel:
     def name(self) -> str:
         return self._name
 
-    def run(self, prompt: str, worktree: Path, *, read_only: bool = False) -> RunResult:
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+    ) -> RunResult:
         self.prompts.append((prompt, read_only))
+        self.tunings.append(tuning)
         if not read_only and self.edits:
             for path, text in self.edits.pop(0).items():
                 target = worktree / path
@@ -153,7 +163,9 @@ def team_run(
     planner, worker, reviewer = team
     root = tmp_path / "work"
     root.mkdir(exist_ok=True)
-    models: dict[str, Provider] = {m.name: m for m in (planner, worker, reviewer)}
+    models: dict[str, Provider] = {}
+    for model in (planner, worker, reviewer):
+        models[model.name] = model
     return Run(
         issue=ISSUE,
         state=State.READY,
@@ -164,6 +176,7 @@ def team_run(
         writer=GitHubWriter(gh, {}, root),
         limits=Limits(max_files=5, max_lines=100),
         triage=None if triage is None else (lambda _system, _user: triage),
+        ladder=DEFAULT_LADDER,
         remote=str(origin),
     )
 
@@ -201,7 +214,7 @@ def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> 
     assert "Co-Authored-By: Codex" in message
     body = gh.pr_body()
     assert "**claude** planned, **mimo** implemented, **codex** reviewed" in body
-    assert "Review 1 (codex): Looks right." in body
+    assert "Review 1 (codex, medium): Looks right." in body
     assert not (tmp_path / "work" / "pwned").exists()
 
 
@@ -399,7 +412,103 @@ def test_configured_and_adapters_follow_the_keys() -> None:
         assert cli.triage(bare, client) is None
         full = Settings(mimo_api_key=SecretStr("m"), nvidia_api_key=SecretStr("n"))
         assert cli.configured(full) == ["claude", "codex", "mimo", "nvidia"]
-        assert set(cli.providers(full)) == {"claude", "codex", "mimo", "nvidia"}
+        adapters = cli.providers(full)
+        assert set(adapters) == {"claude", "codex", "mimo", "nvidia"}
+        claude = adapters["claude"]
+        assert isinstance(claude, ClaudeCli)
+        assert claude.work == Tuning("claude-sonnet-5-5", "medium")
         assert cli.triage(full, client) is not None
         only_nvidia = Settings(mimo_api_key=None, nvidia_api_key=SecretStr("n"))
         assert cli.triage(only_nvidia, client) is not None
+
+
+def test_triage_rating_sets_the_thinking_level(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([{"a.md": "x\n"}], [APPROVE])
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "easy"}',
+    )
+    assert run.execute().state is State.REVIEW
+    assert planner.tunings == [Tuning("claude-sonnet-5-5", "low")]
+    assert reviewer.tunings == [Tuning("gpt-6.1-sol", "low")]
+    assert worker.tunings == [None]
+    assert run.notes[0] == "Triage: proceed, rated easy."
+
+
+def test_a_planner_who_finds_it_harder_plans_again_on_opus(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner = FakeModel(
+        "claude", ["DIFFICULTY: hard\n1. Quick plan", "DIFFICULTY: hard\n1. Deep plan"]
+    )
+    worker = FakeModel("mimo", edits=[{"a.md": "x\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert planner.tunings == [
+        Tuning("claude-sonnet-5-5", "medium"),
+        Tuning("claude-opus-5-5", "high"),
+    ]
+    assert "1. Deep plan" in worker.prompts[0][0]
+    assert "DIFFICULTY" not in worker.prompts[0][0]
+    assert reviewer.tunings == [Tuning("gpt-6-astra", "high")]
+    assert run.level is Level.HARD
+
+
+def test_a_planner_who_finds_it_easier_lowers_the_review(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner = FakeModel("claude", ["DIFFICULTY: easy\n1. Tiny plan"])
+    worker = FakeModel("mimo", edits=[{"a.md": "x\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert len(planner.tunings) == 1
+    assert reviewer.tunings == [Tuning("gpt-6.1-sol", "low")]
+    assert "Planner rated it easy." in run.notes
+
+
+def test_a_rejection_escalates_the_next_review(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models(
+        [{"a.md": "x\n"}, {"a.md": "y\n"}], [REJECT, APPROVE]
+    )
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert reviewer.tunings == [
+        Tuning("gpt-6.1-sol", "medium"),
+        Tuning("gpt-6-astra", "high"),
+    ]
+    assert "Rejected, so the next review runs at hard." in run.notes
+    message = git(origin, "log", "-1", "--format=%B", "agent/7-run-3")
+    assert "Agent-Level: hard" in message
+
+
+def test_a_hard_task_stays_hard_after_a_rejection(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models(
+        [{"a.md": "x\n"}, {"a.md": "y\n"}], [REJECT, APPROVE]
+    )
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "hard"}',
+    )
+    assert run.execute().state is State.REVIEW
+    assert reviewer.tunings == [Tuning("gpt-6-astra", "high")] * 2
+    assert not any(note.startswith("Rejected") for note in run.notes)
+
+
+def test_a_refusal_after_the_rating_line_is_still_a_refusal(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner = FakeModel("claude", ["DIFFICULTY: medium\nREFUSE: needs CI changes"])
+    run = team_run(
+        tmp_path, origin, (planner, FakeModel("mimo"), FakeModel("codex")), FakeGh()
+    )
+    assert run.execute() == Outcome(
+        State.FAILED, "The planner refused: needs CI changes"
+    )
