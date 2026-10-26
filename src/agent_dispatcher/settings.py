@@ -10,6 +10,12 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from agent_dispatcher.levels import DEFAULT_LADDER
 
 
+def load_settings(path: Path) -> "Settings":
+    """Load the controller file independently of an MCP client's working directory."""
+    # Pydantic supports this runtime option; its generated signature omits it.
+    return Settings(_env_file=path)  # pyright: ignore[reportCallIssue]
+
+
 def _split_repos(value: object) -> object:
     """Accept `owner/a,owner/b` from the environment."""
     if isinstance(value, str):

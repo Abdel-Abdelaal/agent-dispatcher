@@ -11,7 +11,7 @@ $exe = Join-Path $repo '.venv\Scripts\agent-dispatcher.exe'
 if ($Mode -eq 'chat') {
     Push-Location $repo
     try {
-        & (Join-Path $repo '.venv\Scripts\python.exe') -m agent_dispatcher.assistant
+        & (Join-Path $repo '.venv\Scripts\python.exe') -m agent_dispatcher.native_ui
     } finally { Pop-Location }
     return
 }
