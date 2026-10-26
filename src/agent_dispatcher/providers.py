@@ -8,6 +8,7 @@ because its harness calls the model.
 import json
 import os
 import shutil
+import signal
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -58,29 +59,62 @@ class TermsError(RuntimeError):
     """The run would break the provider's terms for subscription automation."""
 
 
+# One model call never runs longer than this; a stuck worker can't hold the queue.
+STEP_TIMEOUT_SECONDS = 20 * 60
+TIMED_OUT = 124
+
+
+def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+    """Kill a process and everything it started (shims start the real CLI)."""
+    if os.name == "nt":
+        subprocess.run(  # noqa: S603 - fixed command, our own child's PID
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],  # noqa: S607
+            capture_output=True,
+            check=False,
+        )
+    else:  # pragma: no cover - exercised on the Linux CI runner and VPS
+        os.killpg(process.pid, signal.SIGKILL)
+
+
 def subprocess_runner(
-    argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
+    argv: list[str],
+    cwd: Path,
+    stdin: str,
+    env: Mapping[str, str],
+    timeout: float = STEP_TIMEOUT_SECONDS,
 ) -> tuple[int, str, str]:
     """Run a CLI with the prompt on stdin, so it never shows up in a process list.
 
     The program is resolved on PATH first, so Windows npm shims (`claude.cmd`) run.
+    On timeout the whole process tree is killed and exit code 124 is returned.
     """
     program = shutil.which(argv[0]) or argv[0]
     # Bytes, not text mode: on Windows text mode rewrites line endings, which
     # breaks patches piped to `git apply`.
-    completed = subprocess.run(  # noqa: S603 - argv is built here, never from input
+    process = subprocess.Popen(  # noqa: S603 - argv is built here, never from input
         [program, *argv[1:]],
         cwd=cwd,
-        input=stdin.encode("utf-8"),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env=dict(env),
-        capture_output=True,
-        check=False,
-        timeout=3600,
+        start_new_session=os.name != "nt",
     )
+    try:
+        stdout, stderr = process.communicate(stdin.encode("utf-8"), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            # A grandchild that survived still holds the pipes; don't wait for it.
+            stdout, stderr = b"", b""
+        message = f"timed out after {timeout:.0f}s\n".encode()
+        return TIMED_OUT, stdout.decode("utf-8", "replace"), message.decode()
     return (
-        completed.returncode,
-        completed.stdout.decode("utf-8", errors="replace"),
-        completed.stderr.decode("utf-8", errors="replace"),
+        process.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
     )
 
 

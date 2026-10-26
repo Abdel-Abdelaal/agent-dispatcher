@@ -23,6 +23,7 @@ class AgentPr:
     branch: str
     sha: str
     issue: int
+    base: str = "main"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,24 @@ class GitHubReader:
             labelled_by=self.labelled_by(repo, number),
         )
 
+    def owned_public_repos(self, owner: str) -> list[str]:
+        """Return the owner's public, non-fork, non-archived repositories.
+
+        Private repositories are never discovered: their names must not appear in
+        public evidence such as telemetry.
+        """
+        rows = self._get(
+            f"/users/{owner}/repos",
+            {"type": "owner", "per_page": 100, "sort": "full_name"},
+        )
+        return [
+            row["full_name"]
+            for row in rows
+            if not row.get("private")
+            and not row.get("fork")
+            and not row.get("archived")
+        ]
+
     def agent_prs(self, repo: str) -> list[AgentPr]:
         """Return open PRs whose branch agent-dispatcher created in this repo."""
         rows = self._get(f"/repos/{repo}/pulls", {"state": "open", "per_page": 50})
@@ -99,11 +118,37 @@ class GitHubReader:
             same_repo = head_repo.get("full_name") == repo
             if match and same_repo:
                 issue = int(match["issue"])
-                prs.append(AgentPr(row["number"], head["ref"], head["sha"], issue))
+                base_info: dict[str, Any] = row.get("base") or {}
+                base = str(base_info.get("ref", "main"))
+                prs.append(
+                    AgentPr(row["number"], head["ref"], head["sha"], issue, base)
+                )
         return prs
 
-    def failed_checks(self, repo: str, sha: str) -> list[FailedCheck] | None:
-        """Return the failed blocking checks, or None while any check still runs."""
+    def required_checks(self, repo: str, branch: str) -> set[str]:
+        """Return the checks the branch's rulesets require; empty if unreadable."""
+        response = self._client.get(
+            f"{API}/repos/{repo}/rules/branches/{branch}",
+            headers=self._headers,
+            timeout=30,
+        )
+        if not response.is_success:
+            return set()
+        required: set[str] = set()
+        for rule in response.json():
+            if rule.get("type") == "required_status_checks":
+                checks = rule.get("parameters", {}).get("required_status_checks", [])
+                required |= {check["context"] for check in checks}
+        return required
+
+    def failed_checks(
+        self, repo: str, sha: str, required: set[str] | None = None
+    ) -> list[FailedCheck] | None:
+        """Return failed blocking checks, or None while any check still runs.
+
+        With `required`, only those checks count: a failing advisory or optional
+        check is never worth a repair, and an unreadable ruleset means no repair.
+        """
         response = self._client.get(
             f"{API}/repos/{repo}/commits/{sha}/check-runs",
             params={"per_page": 100},
@@ -119,6 +164,7 @@ class GitHubReader:
             for run in runs
             if run["conclusion"] in {"failure", "timed_out"}
             and not run["name"].startswith(_ADVISORY)
+            and (required is None or run["name"] in required)
         ]
 
     def labelled_by(self, repo: str, number: int) -> str | None:

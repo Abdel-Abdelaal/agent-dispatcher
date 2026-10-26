@@ -31,7 +31,7 @@ comment show why.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema`, `record_id`, `recorded_at` | string | schema name, a UUID, and when the record was written (UTC) |
+| `schema`, `schema_version`, `record_id`, `recorded_at`, `controller_revision` | string, integer | schema name and version, a UUID, the write time (UTC), and the controller's commit |
 | `run_id`, `attempt` | integer | the run in the queue, and the record's order in it (route records use 0) |
 | `repo`, `issue`, `branch`, `pr_url` | string, integer | the joins to GitHub; `branch` and `pr_url` once known |
 | `stage`, `provider`, `harness` | string | see above; harness is `claude-code`, `codex-cli`, `opencode` or `chat-api` |
@@ -42,9 +42,36 @@ comment show why.
 | `outcome`, `exit_code`, `exhausted`, `resets_at` | string, integer, boolean | how the attempt ended |
 | `usage` | object or null | tokens and cost exactly as the CLI reported them; null when the harness reports none |
 | `available_usage` | null | always null until a provider offers a headless reading; unknown stays unknown |
-| `output_sha256`, `output_chars`, `output_excerpt` | string, integer | the model's final text by hash and size, plus at most 2,000 characters |
+| `output_sha256`, `output_chars` | string, integer | the full output's hash and size, always kept |
+| `output_excerpt`, `excerpt_status`, `excerpt_truncated` | string or null, string, boolean | at most 2,000 scanned characters, or `null` with the reason |
 | `gate_refusals`, `files`, `lines` | list, integer | gate records: each refusal, the changed paths (at most 20), and changed lines |
 | `reason` | string | route records: `parked`, `unused` or `not configured` |
+
+## Privacy before retention
+
+Nothing reaches the file before these rules apply:
+
+1. **Credentials are scrubbed.** Every credential the controller holds (GitHub token,
+    Claude token, MiMo and NVIDIA keys), plus common token shapes, is replaced with
+    `[REDACTED]` in every string field.
+2. **Excerpts need a scanner.** An output excerpt is kept only after the trusted
+    scanner at `DISPATCHER_OUTPUT_SCANNER` has passed it. That's an absolute path to
+    a CLI that reads text on stdin, prints the scanned text and exits 0.
+3. **Hash and length always stay.** Without a scanner, or if it fails, the excerpt
+    is `null` and `excerpt_status` says why.
+4. **Private permissions.** The spool directory is created `700` and the file `600`.
+    On Windows that only sets read-only; the file inherits the user profile's ACLs.
+
+| `excerpt_status` | Meaning |
+| --- | --- |
+| `clean` | scanned, nothing changed |
+| `redacted` | scanned, and something was masked |
+| `omitted_no_scanner` | no scanner configured, so only the hash and length are kept |
+| `omitted_scanner_failed` | the scanner failed, so only the hash and length are kept |
+| `empty` | the model returned no text |
+
+Every record also has `schema_version` (1) and `controller_revision` (the controller
+checkout's git commit, or `unknown`). Output records have `excerpt_truncated`.
 
 ## What is never recorded
 

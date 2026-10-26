@@ -184,3 +184,36 @@ def test_cli_status_needs_no_network(
     monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
     assert cli.main(["status"]) == 0
     assert capsys.readouterr().out.splitlines()[0] == "waiting: 0"
+
+
+def repos_client() -> httpx.Client:
+    rows = [
+        {"full_name": "o/public", "private": False, "fork": False, "archived": False},
+        {
+            "full_name": "o/agent-dispatcher",
+            "private": False,
+            "fork": False,
+            "archived": False,
+        },
+        {"full_name": "o/secret", "private": True, "fork": False, "archived": False},
+        {"full_name": "o/forked", "private": False, "fork": True, "archived": False},
+        {"full_name": "o/old", "private": False, "fork": False, "archived": True},
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/users/o/repos"
+        return httpx.Response(200, json=rows)
+
+    return REAL_CLIENT(transport=httpx.MockTransport(handle))
+
+
+def test_auto_discovers_public_repos_and_never_the_controller() -> None:
+    reader = GitHubReader(repos_client())
+    auto = Settings(owner="o", repos=["auto"], exclude_repos=["o/agent-dispatcher"])
+    assert cli.target_repos(auto, reader) == ["o/public"]
+    listed = Settings(
+        owner="o",
+        repos=["o/a", "O/Agent-Dispatcher"],
+        exclude_repos=["o/agent-dispatcher"],
+    )
+    assert cli.target_repos(listed, reader) == ["o/a"]
