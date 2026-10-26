@@ -46,6 +46,10 @@ def settle(
             outcome=outcome,
             reason="Owned controller cycle stopped or disappeared.",
         )
+        sys.stdout.write(
+            f"Run{record.id} stopped: {outcome}. Written files retained; "
+            f"https://github.com/{record.repo}/issues/{record.number}\n"
+        )
         notify(record, outcome)
 
 

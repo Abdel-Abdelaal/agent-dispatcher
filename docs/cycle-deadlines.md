@@ -44,6 +44,12 @@ push, and held secrets are redacted from failure reasons before issue comments.
 After termination, local run state and hash-based telemetry are retained. GitHub
 label/comment cleanup is bounded and best effort, so a network failure can leave
 the remote label stale; local history remains authoritative about the timeout.
+Termination does not delete the agent clone or undo files already written. The
+issue notice names the run clone and explicitly says the task is incomplete.
+The local console also prints the issue URL if remote notification fails.
+There is no automatic native-chat push notification: the issue and `mimo status`
+are the current completion/failure surfaces. Unsaved edits and model conversation
+state are not recoverable checkpoints; a deliberate continuation needs inspection.
 Any existing draft PR must still be checked independently. Cleanup does not merge
 or close it. The controller budget excludes host audit intake, export and final
 notification work. It does not guarantee code quality or completion by deadline.

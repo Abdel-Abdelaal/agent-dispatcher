@@ -386,7 +386,11 @@ def failure_notice(settings: Settings) -> Callable[[RunRecord, str], None]:
                 record.repo,
                 record.number,
                 f"Controller cycle stopped: {outcome}. Run{record.id} was retained; "
-                "no automatic retry. Check any existing draft PR independently.",
+                "this is not a completed task. No automatic retry or merge. "
+                f"Files already written remain in `run-{record.id}-agent` under "
+                "the controller's work directory, if that clone was created. "
+                "The interrupted model conversation cannot yet be resumed. "
+                "Inspect those files and any existing draft PR before continuing.",
             )
         except (httpx.HTTPError, PublishError, ValueError):
             sys.stderr.write(

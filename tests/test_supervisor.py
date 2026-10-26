@@ -314,6 +314,10 @@ def test_failure_notice_preserves_review_and_uses_bounded_controller_writes(
         2 if state == "agent:ready" else 0 if state == "agent:review" else 1
     )
     writer.comment.assert_called_once()
+    notice = writer.comment.call_args.args[2]
+    assert "not a completed task" in notice
+    assert "run-1-agent" in notice
+    assert "conversation cannot yet be resumed" in notice
 
 
 def test_failure_notice_failure_does_not_undo_local_completion(
