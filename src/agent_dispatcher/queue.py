@@ -80,12 +80,37 @@ class RunQueue:
         self._db.close()
 
     def enqueue(self, issue: Issue, now: datetime) -> bool:
-        """Add an issue once; return False if it was already queued."""
+        """Queue an issue; return False if it was already waiting.
+
+        A task whose last run has finished comes back only because the owner put
+        `agent:ready` on it again (the controller always moves that label away when
+        a run starts), so it is queued again for a fresh run.
+        """
         cursor = self._db.execute(
             "INSERT OR IGNORE INTO tasks VALUES (?, ?, ?, ?)",
             (issue.repo, issue.number, issue.title, now.isoformat()),
         )
-        return cursor.rowcount == 1
+        if cursor.rowcount == 1:
+            return True
+        reopened = self._db.execute(
+            """
+            UPDATE tasks SET queued_at = ?, title = ?
+            WHERE repo = ? AND number = ?
+            AND EXISTS (
+                SELECT 1 FROM runs r
+                WHERE r.repo = tasks.repo AND r.number = tasks.number
+                AND r.started_at >= tasks.queued_at
+                AND r.finished_at IS NOT NULL AND r.outcome != 'parked'
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM runs r
+                WHERE r.repo = tasks.repo AND r.number = tasks.number
+                AND r.finished_at IS NULL
+            )
+            """,
+            (now.isoformat(), issue.title, issue.repo, issue.number),
+        )
+        return reopened.rowcount == 1
 
     def next_task(self) -> Task | None:
         """Return the oldest task with no run yet, or whose runs were all parked."""
@@ -141,13 +166,14 @@ class RunQueue:
         )
 
     def waiting(self) -> list[Task]:
-        """Return queued tasks with no run yet, or whose runs were all parked."""
+        """Return tasks with no run since they were queued, apart from parked ones."""
         rows = self._db.execute(
             """
             SELECT t.repo, t.number, t.title FROM tasks t
             WHERE NOT EXISTS (
                 SELECT 1 FROM runs r
                 WHERE r.repo = t.repo AND r.number = t.number
+                AND r.started_at >= t.queued_at
                 AND (r.outcome IS NULL OR r.outcome != 'parked')
             )
             ORDER BY t.queued_at, t.repo, t.number
