@@ -30,6 +30,15 @@ def test_teams_follow_quota() -> None:
     assert choose_team(thinkers_spent, 0.6, NOW) is None
 
 
+def test_worker_fallback_respects_every_provider_quota() -> None:
+    quotas = {"codex": Quota("codex", 0.9, None), "mimo": Quota("mimo", 0.1, None)}
+    team = choose_team(quotas, 0.6, NOW, allow_worker_thinking=True)
+    assert team is not None
+    assert team.members() == ("mimo",)
+    quotas["mimo"] = Quota("mimo", 0.9, None)
+    assert choose_team(quotas, 0.6, NOW, allow_worker_thinking=True) is None
+
+
 def test_cycle_queues_only_owner_labelled_issues(tmp_path: Path) -> None:
     issues = [
         Issue("o/r", 1, "mine", "", ("agent:ready",), "owner"),

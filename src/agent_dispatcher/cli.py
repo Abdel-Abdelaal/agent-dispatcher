@@ -138,7 +138,7 @@ def triage_model(settings: Settings) -> str | None:
     """Return the model triage uses, for telemetry."""
     if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         return mimo(settings.mimo_api_key).model
-    if settings.nvidia_api_key:
+    if settings.nvidia_api_key and "nvidia" not in settings.disabled_providers:
         return nvidia(settings.nvidia_api_key).model
     return None
 
