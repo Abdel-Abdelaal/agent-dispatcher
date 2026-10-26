@@ -75,6 +75,10 @@ The controller can attempt one repair of failed required CI when no task is
 waiting. A second failure needs investigation rather than an unlimited retry
 loop. Do not weaken tests or protections to get a green result.
 
+An invalid review verdict gets one formatting retry by the read-only reviewer.
+It never authorizes a code edit or counts as approval. Two invalid replies stop
+the task without publishing a PR.
+
 The fleet shares reusable checks, with additional checks appropriate to each
 repository. Shortlink's application checks and PR-Agent trial are not universal.
 Old open PRs need fresh checks on their latest commit; new repo enrollment must

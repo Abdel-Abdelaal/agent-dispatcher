@@ -480,7 +480,26 @@ class Run:
         )
         verdict = json_reply(reply)
         if verdict is None:
-            return False, "The review was not valid JSON.", "Reply in the JSON format."
+            # A protocol failure is not a code finding. Ask the read-only
+            # reviewer once more rather than sending formatting work to a worker.
+            reply = self._step(
+                self.team.reviewer,
+                "reviewing",
+                prompt + "\nReturn exactly one valid JSON object. "
+                "Quote property names, escape strings and omit commentary.\n",
+                clone,
+                read_only=True,
+                kind=kind,
+                context={
+                    "issue": sha256(untrusted_block(self.issue)),
+                    "plan": sha256(plan),
+                    "diff": sha256(patch),
+                },
+                verdict=_review_verdict,
+            )
+            verdict = json_reply(reply)
+            if verdict is None:
+                raise Stop(self._failure("The reviewer returned invalid JSON twice."))
         raw = verdict.get("findings")
         items = cast("list[object]", raw) if isinstance(raw, list) else []
         findings = "\n".join(f"- {item}" for item in items)
