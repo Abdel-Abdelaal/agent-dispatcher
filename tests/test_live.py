@@ -3,7 +3,7 @@
 import json
 import os
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from agent_dispatcher import cli
 from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import Outcome, Provider, Run, json_reply, pr_title
 from agent_dispatcher.gate import Limits
+from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.levels import DEFAULT_LADDER, Level
 from agent_dispatcher.providers import ClaudeCli, RunResult, Tuning, subprocess_runner
@@ -512,3 +513,214 @@ def test_a_refusal_after_the_rating_line_is_still_a_refusal(
     assert run.execute() == Outcome(
         State.FAILED, "The planner refused: needs CI changes"
     )
+
+
+# CI repair of agent PRs.
+
+REPAIR_AT = datetime(2026, 10, 26, tzinfo=UTC)
+
+
+def published_pr(tmp_path: Path, origin: Path) -> AgentPr:
+    """Run a team once so origin has an agent branch, and return it as a PR."""
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+    first = tmp_path / "first"
+    first.mkdir()
+    team_run(first, origin, (planner, worker, reviewer), FakeGh()).execute()
+    sha = git(origin, "rev-parse", "agent/7-run-3").strip()
+    return AgentPr(number=9, branch="agent/7-run-3", sha=sha, issue=7)
+
+
+def repair_run(tmp_path: Path, origin: Path, worker: FakeModel, reviewer: FakeModel):
+    run = team_run(
+        tmp_path, origin, (FakeModel("claude"), worker, reviewer), gh := FakeGh()
+    )
+    run.run_id = 4
+    return run, gh
+
+
+def test_a_ci_failure_is_repaired_on_the_same_branch(
+    tmp_path: Path, origin: Path
+) -> None:
+    pr = published_pr(tmp_path, origin)
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n\nFixed.\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run, gh = repair_run(tmp_path, origin, worker, reviewer)
+    outcome = run.repair(pr, "E501 line too long")
+    assert outcome.state is State.REVIEW
+    assert "<<<CI_LOG>>>\nE501 line too long" in worker.prompts[0][0]
+    assert "Fix the failing CI check" in reviewer.prompts[0][0]
+    log = git(origin, "log", "--format=%s", "agent/7-run-3")
+    assert log.splitlines()[0] == "fix: repair failing CI for #7"
+    assert git(origin, "show", "agent/7-run-3:docs/api.md") == "# API\n\nFixed.\n"
+    comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
+    assert "pushed a CI repair" in comment
+    assert gh.labels() == []
+
+
+def test_a_rejected_repair_is_reported_and_not_pushed(
+    tmp_path: Path, origin: Path
+) -> None:
+    pr = published_pr(tmp_path, origin)
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "broken\n"}])
+    run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex", [REJECT]))
+    outcome = run.repair(pr, "log")
+    assert outcome.state is State.FAILED
+    assert git(origin, "rev-parse", "agent/7-run-3").strip() == pr.sha
+    comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
+    assert "rejected the repair" in comment
+
+
+def test_a_spent_worker_parks_quietly(tmp_path: Path, origin: Path) -> None:
+    pr = published_pr(tmp_path, origin)
+    worker = FakeModel("mimo")
+    worker.exhausted = True
+    worker.code = 1
+    run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex"))
+    assert run.repair(pr, "log").state is State.PARKED
+    assert gh.calls == []
+
+
+def pulls_client(check_runs: Sequence[Mapping[str, object]]) -> httpx.Client:
+    pulls = [
+        {
+            "number": 9,
+            "head": {
+                "ref": "agent/7-run-3",
+                "sha": "abc",
+                "repo": {"full_name": "o/r"},
+            },
+        },
+        {
+            "number": 10,
+            "head": {"ref": "feature/x", "sha": "def", "repo": {"full_name": "o/r"}},
+        },
+        {"number": 11, "head": {"ref": "agent/8-run-4", "sha": "ghi", "repo": None}},
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/pulls"):
+            return httpx.Response(200, json=pulls)
+        return httpx.Response(200, json={"check_runs": check_runs})
+
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def test_reader_finds_only_agent_prs_from_this_repo() -> None:
+    reader = GitHubReader(pulls_client([]))
+    assert reader.agent_prs("o/r") == [AgentPr(9, "agent/7-run-3", "abc", 7)]
+
+
+def test_failed_checks_wait_for_completion_and_skip_advisory_ones() -> None:
+    url = "https://github.com/o/r/actions/runs/1/job/42"
+    running = [{"name": "ci / Test", "status": "in_progress", "conclusion": None}]
+    assert GitHubReader(pulls_client(running)).failed_checks("o/r", "abc") is None
+    done = [
+        {
+            "name": "ci / Test",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": url,
+        },
+        {
+            "name": "review / ai / Isolated analysis",
+            "status": "completed",
+            "conclusion": "failure",
+        },
+        {"name": "ci / Lint", "status": "completed", "conclusion": "success"},
+    ]
+    failed = GitHubReader(pulls_client(done)).failed_checks("o/r", "abc")
+    assert failed == [FailedCheck("ci / Test", "42")]
+
+
+def test_failed_log_keeps_the_tail_and_tolerates_errors(tmp_path: Path) -> None:
+    class LogGh(FakeGh):
+        def __call__(
+            self, argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
+        ) -> tuple[int, str, str]:
+            if "--log-failed" in argv:
+                return 0, "\n".join(f"line {n}" for n in range(200)), ""
+            return super().__call__(argv, cwd, stdin, env)
+
+    writer = GitHubWriter(LogGh(), {}, tmp_path)
+    log = writer.failed_log("o/r", "42", lines=3)
+    assert log == "line 197\nline 198\nline 199"
+    broken = GitHubWriter(FakeGh(fail_on="--log-failed"), {}, tmp_path)
+    assert broken.failed_log("o/r", "42") == ""
+
+
+def test_queue_counts_repairs(tmp_path: Path) -> None:
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    assert queue.repairs("o/r", 9) == 0
+    queue.record_repair("o/r", 9, "abc", "REVIEW", REPAIR_AT)
+    assert queue.repairs("o/r", 9) == 1
+    queue.close()
+
+
+class FakeReader:
+    def __init__(self, failed: list[FailedCheck] | None) -> None:
+        self.failed = failed
+
+    def agent_prs(self, repo: str) -> list[AgentPr]:
+        del repo
+        return [AgentPr(9, "agent/7-run-3", "abc", 7)]
+
+    def failed_checks(self, repo: str, sha: str) -> list[FailedCheck] | None:
+        del repo, sha
+        return self.failed
+
+    def issue(self, repo: str, number: int) -> Issue:
+        del repo, number
+        return ISSUE
+
+
+def test_repair_next_repairs_once_per_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repaired: list[tuple[int, str]] = []
+
+    class FakeRun:
+        def repair(self, pr: AgentPr, logs: str) -> cli.Outcome:
+            repaired.append((pr.number, logs))
+            return cli.Outcome(State.REVIEW, "fixed")
+
+    class Writer:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def failed_log(self, repo: str, job_id: str) -> str:
+            del repo
+            return f"log {job_id}"
+
+    def fake_make_run(*_: object, **__: object) -> FakeRun:
+        return FakeRun()
+
+    monkeypatch.setattr(cli, "make_run", fake_make_run)
+    monkeypatch.setattr(cli, "GitHubWriter", Writer)
+    settings = Settings(repos=["o/r"], work_root=tmp_path / "runs", mimo_api_key=None)
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    with httpx.Client() as client:
+        reader = FakeReader([FailedCheck("ci / Test", "42")])
+        result = cli.repair_next(settings, reader, queue, client)  # pyright: ignore[reportArgumentType]
+        assert result == "repair: o/r#9 agent:review fixed"
+        assert repaired == [(9, "### ci / Test\nlog 42")]
+        assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
+        assert len(repaired) == 1
+    queue.close()
+
+
+def test_repair_next_skips_green_or_running_prs_and_parked_teams(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(repos=["o/r"], work_root=tmp_path / "runs", mimo_api_key=None)
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    with httpx.Client() as client:
+        nothing_failed: tuple[list[FailedCheck] | None, ...] = (None, [])
+        for failed in nothing_failed:
+            reader = FakeReader(failed)
+            assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
+        until = datetime(2099, 1, 1, tzinfo=UTC)
+        queue.park("claude", until)
+        queue.park("codex", until)
+        reader = FakeReader([FailedCheck("ci / Test", "42")])
+        assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
+    queue.close()

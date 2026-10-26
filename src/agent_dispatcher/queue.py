@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TEXT,
     outcome TEXT
 );
+CREATE TABLE IF NOT EXISTS repairs (
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    sha TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS parked_providers (
     provider TEXT PRIMARY KEY,
     until TEXT NOT NULL
@@ -113,3 +120,19 @@ class RunQueue:
         """Return each parked provider and when it may run again."""
         rows = self._db.execute("SELECT provider, until FROM parked_providers")
         return {name: datetime.fromisoformat(until) for name, until in rows}
+
+    def repairs(self, repo: str, pr: int) -> int:
+        """Return how many CI repairs a PR has had."""
+        row = self._db.execute(
+            "SELECT COUNT(*) FROM repairs WHERE repo = ? AND pr = ?", (repo, pr)
+        ).fetchone()
+        return int(row[0])
+
+    def record_repair(
+        self, repo: str, pr: int, sha: str, outcome: str, now: datetime
+    ) -> None:
+        """Remember a repair attempt, so a PR is never repaired twice for one cap."""
+        self._db.execute(
+            "INSERT INTO repairs VALUES (?, ?, ?, ?, ?)",
+            (repo, pr, sha, outcome, now.isoformat()),
+        )

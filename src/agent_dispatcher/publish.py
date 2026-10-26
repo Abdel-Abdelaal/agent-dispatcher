@@ -56,6 +56,22 @@ class GitHubWriter:
             stdin=body,
         )
 
+    def pr_comment(self, repo: str, number: int, body: str) -> None:
+        """Comment on a pull request."""
+        self._gh(
+            "pr", "comment", str(number), "--repo", repo, "--body-file", "-", stdin=body
+        )
+
+    def failed_log(self, repo: str, job_id: str, lines: int = 120) -> str:
+        """Return the tail of a failed Actions job's log, or "" if it can't be read."""
+        try:
+            log = self._gh(
+                "run", "view", "--repo", repo, "--job", job_id, "--log-failed"
+            )
+        except PublishError:
+            return ""
+        return "\n".join(log.splitlines()[-lines:])
+
     def draft_pr(self, repo: str, branch: str, base: str, title: str, body: str) -> str:
         """Open a draft PR labelled `ai-generated` and return its URL."""
         return self._gh(
