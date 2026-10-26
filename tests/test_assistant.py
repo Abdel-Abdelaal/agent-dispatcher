@@ -357,6 +357,11 @@ def test_provider_failure_clears_incomplete_history_without_tool_action(
     assert len(requests) == 1
     assert not chat.messages
     assert not cast(Mock, tools.runner).called
+    audit = next((tools.root / "runs" / "assistant-telemetry").glob("*.jsonl"))
+    record = json.loads(audit.read_text())
+    assert record["outcome"] == ("exhausted" if failure == 429 else "failed")
+    assert record["output_sha256"] is None
+    assert "provider-secret-diagnostic" not in audit.read_text()
 
 
 def test_no_text_reply_reports_protocol_problem(tools: ControllerTools) -> None:

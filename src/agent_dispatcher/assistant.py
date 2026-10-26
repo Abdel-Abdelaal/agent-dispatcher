@@ -132,7 +132,25 @@ class Conversation:
             try:
                 raw = self.model.exchange(prompt, tool_definition(), self.client)
                 reply = Completion.model_validate(raw)
-            except (httpx.HTTPError, ValidationError):
+            except (httpx.HTTPError, ValidationError) as error:
+                status = (
+                    error.response.status_code
+                    if isinstance(error, httpx.HTTPStatusError)
+                    else None
+                )
+                self.audit.record(
+                    stage="chat",
+                    provider="mimo",
+                    harness="controller-chat",
+                    input_sha256=sha256(json.dumps(prompt)),
+                    input_chars=len(json.dumps(prompt)),
+                    output_sha256=None,
+                    outcome="exhausted"
+                    if status == HTTPStatus.TOO_MANY_REQUESTS
+                    else "failed",
+                    http_status=status,
+                    usage=None,
+                )
                 self.messages.clear()
                 raise
             message = reply.choices[0].message
@@ -178,10 +196,12 @@ class Conversation:
 
     def invoke(self, call: Call, seen: set[str]) -> str:
         """Validate and deduplicate model requests before controller dispatch."""
+        action = "invalid_request"
         try:
             if call.function.name != "orchestrator" or call.type != "function":
                 fail("Unknown tool.")
             request = Request.model_validate_json(call.function.arguments)
+            action = request.action
             signature = request.model_dump_json()
             if signature in seen:
                 fail("Repeated action stopped; inspect state instead of retrying.")
@@ -199,10 +219,10 @@ class Conversation:
             )
             return redact(result, (self.model.api_key.get_secret_value(),))[0]
         except ToolError as error:
-            self.audit.record(stage="tool", outcome="failed", action="not_completed")
+            self.audit.record(stage="tool", outcome="failed", action=action)
             return "Tool did not complete: " + str(error)
         except (ValueError, OSError, KeyError, TypeError):
-            self.audit.record(stage="tool", outcome="failed", action="not_completed")
+            self.audit.record(stage="tool", outcome="failed", action=action)
             return (
                 "Tool did not complete. Check arguments, approval or live state; "
                 "do not assume success."
