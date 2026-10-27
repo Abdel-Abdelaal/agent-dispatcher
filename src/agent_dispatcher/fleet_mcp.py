@@ -24,6 +24,7 @@ DESCRIPTIONS = {
     "inspect_pr": "Inspect an owned public PR's files and actual CI checks.",
     "search_repos": "Search public GitHub projects for reusable open-source work.",
     "status": "Read queued and running team tasks and provider availability.",
+    "inspect_run": "Inspect local run metrics by repo/run number; no raw payloads.",
     "queue_task": "Publish a public ready task with title/text. Does not start it.",
     "create_repo": "Create an owned repo; private unless public explicitly chosen.",
     "start": "Start the MiMo-only team in the background for real coding work.",

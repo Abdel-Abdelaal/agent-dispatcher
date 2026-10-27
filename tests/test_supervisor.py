@@ -157,10 +157,11 @@ def test_orphan_recovery_requires_expired_confirmed_dead_owner(
 def test_wait_owned_kills_only_its_own_child_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    process = Mock(
-        communicate=Mock(
-            side_effect=[subprocess.TimeoutExpired("owned", 1), (b"out", b"err")]
-        )
+    process = Mock(communicate=Mock(return_value=(b"out", b"err")))
+    monkeypatch.setattr(
+        supervisor,
+        "communicate",
+        Mock(side_effect=subprocess.TimeoutExpired("owned", 1)),
     )
     killed = Mock()
     monkeypatch.setattr(supervisor, "kill_tree", killed)
@@ -172,6 +173,11 @@ def test_wait_owned_handles_surviving_pipe_without_waiting_forever(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     process = Mock(communicate=Mock(side_effect=subprocess.TimeoutExpired("owned", 1)))
+    monkeypatch.setattr(
+        supervisor,
+        "communicate",
+        Mock(side_effect=subprocess.TimeoutExpired("owned", 1)),
+    )
     monkeypatch.setattr(supervisor, "kill_tree", Mock())
     assert supervisor.wait_owned(process, 1) == (124, "", "")
 
@@ -290,6 +296,11 @@ def test_failed_termination_does_not_release_active_lease(
     process = Mock(
         communicate=Mock(side_effect=subprocess.TimeoutExpired("owned", 1)),
         poll=Mock(return_value=None),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "communicate",
+        Mock(side_effect=subprocess.TimeoutExpired("owned", 1)),
     )
     monkeypatch.setattr(supervisor, "kill_tree", Mock())
     with pytest.raises(RuntimeError, match="retain its lease"):

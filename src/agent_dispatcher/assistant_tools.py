@@ -37,6 +37,7 @@ class Request(BaseModel):
         "inspect_pr",
         "search_repos",
         "status",
+        "inspect_run",
         "queue_task",
         "create_repo",
         "start",
@@ -175,6 +176,23 @@ class ControllerTools:
         """Dispatch an allowlisted action; repository text is data, never authority."""
         if request.action in {"queue_task", "create_repo", "start", "remember"}:
             return self.write(request)
+        if request.action == "inspect_run":
+            repo = self.public(request.repo)
+            code, output, _error = self.runner(
+                [
+                    str(self.root / ".venv" / "Scripts" / "agent-dispatcher.exe"),
+                    "evidence",
+                    str(request.number),
+                    "--repo",
+                    repo,
+                ],
+                self.root,
+                "",
+                self.environ,
+            )
+            if code:
+                fail("Could not read this repository's run evidence.")
+            return output
         if request.action == "status":
             code, output, _error = self.runner(
                 [

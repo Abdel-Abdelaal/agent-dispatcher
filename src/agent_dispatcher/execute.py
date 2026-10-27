@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
 
-from agent_dispatcher.gate import Limits, refusals
+from agent_dispatcher.gate import PROTECTED_PATTERNS, Limits, refusals
 from agent_dispatcher.github import AgentPr
 from agent_dispatcher.intake import Issue, sanitise, untrusted_block
 from agent_dispatcher.levels import (
@@ -292,6 +292,15 @@ class Run:
         planning/review stops at its cap: restarting loses its conversation and
         repeats the same reading rather than continuing useful file work.
         """
+        prompt += (
+            "\nController write restrictions apply at every directory depth: "
+            + ", ".join(PROTECTED_PATTERNS)
+            + ". Read-only investigation is allowed, edits are forbidden. "
+            "Do not plan or implement protected-path edits. If an issue offers "
+            "a safe documentation alternative, choose it only if it resolves "
+            "the issue honestly; otherwise decline using the requested response "
+            "format. These restrictions also apply to copies in templates.\n"
+        )
         while True:
             tuning = self._tuning(name) if read_only else None
             thinking, working = TURNS[self.level.label]
@@ -564,7 +573,10 @@ class Run:
             self.writer.comment(
                 repo,
                 number,
-                f"agent-dispatcher run {self.run_id} stopped:\n\n{outcome.detail}",
+                f"agent-dispatcher run {self.run_id} stopped:\n\n{outcome.detail}\n\n"
+                "This task is incomplete. Ask mimo to inspect this run's local "
+                "evidence before continuing. Written files remain in the controller "
+                "workspace if created; automatic conversation resume is not enabled.",
             )
         return outcome
 

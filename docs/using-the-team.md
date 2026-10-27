@@ -188,3 +188,8 @@ tools or credentials merely to avoid a refusal.
 
 This system reduces repeated work and records evidence. Defect-free development,
 universal tool coverage and superiority over a simpler workflow are not proven.
+
+Native OpenCode diagnostic state remains local and confidential. Ask the native
+assistant to inspect a run by repository and run number; see the
+[run evidence guide](native-run-evidence.md). Raw state is not a public export
+and does not yet provide validated automatic conversation resume.

@@ -19,6 +19,7 @@ from typing import cast
 import httpx
 from pydantic import SecretStr
 
+from agent_dispatcher.deadline import communicate
 from agent_dispatcher.quota import looks_exhausted, reset_time
 
 # Variables a CLI needs to find its own login, its binaries and a temp directory.
@@ -103,7 +104,7 @@ def subprocess_runner(
         start_new_session=os.name != "nt",
     )
     try:
-        stdout, stderr = process.communicate(stdin.encode("utf-8"), timeout=timeout)
+        stdout, stderr = communicate(process, timeout, stdin.encode("utf-8"))
     except subprocess.TimeoutExpired:
         kill_tree(process)
         try:

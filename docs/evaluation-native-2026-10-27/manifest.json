@@ -1,0 +1,45 @@
+{
+  "baseline_sha": "d142d64742f0132d5f57471326cc7a6300651721",
+  "controller_revision": "e9895a5e36b95e1c27e8fed23d92f3234419df76",
+  "acceptance_sha256": "0f7c911154dd3fd8a9afa8445c678ceab429118a41e82d91aa85b973e85ac669",
+  "task_sha256": "3c7b3b86711cac76bbcff22432cf7dfe25c9ba912598870036978913e2af10c2",
+  "baseline": {
+    "passed": 1,
+    "failed": 5,
+    "total": 6
+  },
+  "case": "HEAD without hit increments",
+  "worker_deadline_minutes": 35,
+  "no_manual_agent_code_edits": true,
+  "first_run": {
+    "run_id": 27,
+    "outcome": "operator_cancelled",
+    "planner_first_turn_cap_seconds": 768.193,
+    "elapsed_seconds": 1128.061915,
+    "manual_agent_code_edits": false,
+    "pr": null,
+    "note": "Windows Stop-ScheduledTask stopped the named task and controller. Scheduler temporarily disabled for reliability fixes. No allowance/repair-row reset."
+  },
+  "rerun": {
+    "controller_revision": "58c6a2cdad936340a3faf2fed61509c43adc0598",
+    "harness": "opencode",
+    "reasoning": "enabled",
+    "cycle_deadline_minutes": 60,
+    "started_at": "2026-10-26T21:49:39.8717071Z",
+    "task_prompt_sha256": "396e5dc84aed45723f31f0bfe8f5200376e43521c5a2b38950fe1db6c0233930",
+    "status": "failed",
+    "issue": 60,
+    "run_id": 28,
+    "outcome": "plan_timed_out",
+    "plan_reported_duration_ms": 33655801,
+    "reported_usage": {
+      "input_tokens": 33601,
+      "output_tokens": 789,
+      "reasoning_tokens": 36089
+    },
+    "candidate_pr": null,
+    "manual_agent_code_edits": false,
+    "candidate_acceptance": "not run: no implementation",
+    "deadline_overrun_observed": true
+  }
+}

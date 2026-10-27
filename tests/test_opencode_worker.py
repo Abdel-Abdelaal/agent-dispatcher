@@ -111,8 +111,40 @@ def test_cli_requires_explicit_alternative_harness_selection() -> None:
     adapter = cli.providers(settings)["mimo"]
     assert isinstance(adapter, MiMoOpenCode)
     assert adapter.executable == "D:/trusted/opencode.exe"
+    assert adapter.checkpoint_root == settings.work_root.resolve() / "checkpoints"
     assert adapter.reasoning == "disabled"
     config = json.loads(adapter.config(read_only=True, steps=7))
     assert config["provider"]["worker"]["models"]["mimo-v2.6-flash"]["options"] == {
         "thinking": {"type": "disabled"},
     }
+
+
+def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
+    tmp_path: Path,
+) -> None:
+    cache: list[Path] = []
+
+    def runner(
+        _argv: list[str], _cwd: Path, _stdin: str, env: Mapping[str, str]
+    ) -> tuple[int, str, str]:
+        cache.append(Path(env["XDG_CACHE_HOME"]).parent)
+        data = Path(env["XDG_DATA_HOME"]) / "opencode"
+        data.mkdir(parents=True)
+        (data / "opencode.db").write_bytes(b"synthetic native state")
+        return 124, "", "timed out"
+
+    worker = MiMoOpenCode(
+        SecretStr("must-not-persist"), checkpoint_root=tmp_path / "checkpoints"
+    )
+    result = worker.run("private task", tmp_path, runner=runner, environ={})
+    assert result.stop_reason == "timed_out"
+    retained = list((tmp_path / "checkpoints").iterdir())
+    assert len(retained) == 1
+    assert (retained[0] / "task.md").read_text() == "private task"
+    assert (
+        retained[0] / "data/opencode/opencode.db"
+    ).read_bytes() == b"synthetic native state"
+    metadata = (retained[0] / "metadata.json").read_text()
+    assert "must-not-persist" not in metadata
+    assert "private task" not in metadata
+    assert not cache[0].exists()

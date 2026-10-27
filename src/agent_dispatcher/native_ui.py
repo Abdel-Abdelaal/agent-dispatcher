@@ -34,6 +34,9 @@ so the eventual PR describes the actual change accurately.
 For a test request, propose a meaningful bounded task, not pointless time padding.
 Use trifecta_status and inspect_pr/list_work to report actual results, never
 assume a queued task completed. Tasks run serially, not always immediately.
+Use trifecta_inspect_run with repo and run number to diagnose phase outcomes,
+token usage and retained native tool counters. These are local observations,
+not independent proof that the implementation is correct. Inspect actual PR/CI.
 You can create repos with trifecta_create_repo (private default), but private
 coding is not enabled. New public repos need enrollment/checks before coding.
 Writes request the owner's approval through the native OpenCode permission UI.
