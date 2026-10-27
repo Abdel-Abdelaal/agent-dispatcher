@@ -19,10 +19,12 @@ version-specific behavior must be checked again before a CLI upgrade. The diff
 gate now protects `.opencode` files from agent edits as well.
 
 Prompts are attached as files outside the model worktree, never command arguments.
-Configuration, logs, data, sessions and temporary files use a per-call temporary
-directory that is removed afterward. This comparison does not enable durable raw
-transcript retention. A future resume feature needs a separate confidential
-storage design. Tool permissions do not constitute an operating-system sandbox.
+The configured controller now retains private prompt/native data/event evidence
+under `runs/checkpoints`; ambient configuration, bootstrap cache and temporary
+files remain ephemeral. Standalone adapter calls without a checkpoint root stay
+ephemeral. See [native run evidence](native-run-evidence.md) for confidentiality,
+inspection and the absence of validated automatic resume. Tool permissions do
+not constitute an operating-system sandbox.
 
 The adapter extracts the final text event, explicit token counters and error
 events. Unknown usage stays unknown. The existing pre-retention scanner and

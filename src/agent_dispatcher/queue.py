@@ -217,6 +217,15 @@ class RunQueue:
         )
         return [RunRecord(*row) for row in rows]
 
+    def find_run(self, run_id: int) -> RunRecord | None:
+        """Look up one run so diagnostic reads can verify repository ownership."""
+        row = self._db.execute(
+            "SELECT id,repo,number,provider,started_at,finished_at,outcome "
+            "FROM runs WHERE id=?",
+            (run_id,),
+        ).fetchone()
+        return RunRecord(*row) if row else None
+
     def register_cycle(self, lease: CycleLease) -> None:
         """Record only a process started by the supervisor, never an arbitrary PID."""
         self._db.execute(

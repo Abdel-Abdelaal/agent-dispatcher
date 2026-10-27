@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import SecretStr
 
+from agent_dispatcher import native_evidence
 from agent_dispatcher.providers import (
     MIMO_MODEL,
     MIMO_OPENAI,
@@ -63,6 +64,7 @@ class MiMoOpenCode:
     executable: str = "opencode"
     name: str = "mimo"
     reasoning: Literal["enabled", "disabled"] = "enabled"
+    checkpoint_root: Path | None = None
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -120,15 +122,25 @@ class MiMoOpenCode:
         runner: Runner = subprocess_runner,
         environ: Mapping[str, str] | None = None,
     ) -> RunResult:
-        """Run with no user config, persistent transcripts or prompt arguments."""
+        """Isolate ambient config; optionally retain private native diagnostic state."""
         del tuning
         with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
             root = Path(tmp)
-            task = root / "task.md"
+            evidence = root
+            if self.checkpoint_root is not None:
+                evidence = native_evidence.create(
+                    self.checkpoint_root,
+                    worktree,
+                    prompt,
+                    read_only=read_only,
+                    reasoning=self.reasoning,
+                )
+            task = evidence / "task.md"
             task.write_text(prompt, encoding="utf-8")
             env = scrubbed_env(os.environ if environ is None else environ)
             for key in ("CONFIG", "DATA", "CACHE", "STATE"):
                 env[f"XDG_{key}_HOME"] = str(root / key.lower())
+            env["XDG_DATA_HOME"] = str(evidence / "data")
             (root / "tmp").mkdir()
             env["TEMP"] = env["TMP"] = str(root / "tmp")
             env.update(
@@ -158,6 +170,8 @@ class MiMoOpenCode:
                 "Finish with the requested answer once the file work is complete.",
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
+            if self.checkpoint_root is not None:
+                native_evidence.finish(evidence, code, stdout)
         text, usage, failed = events(stdout)
         return provider_result(
             self.name,

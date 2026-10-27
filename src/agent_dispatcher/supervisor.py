@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psutil
 
+from agent_dispatcher.deadline import communicate
 from agent_dispatcher.providers import TIMED_OUT, kill_tree
 from agent_dispatcher.queue import CycleLease, RunQueue, RunRecord
 from agent_dispatcher.settings import Settings
@@ -73,7 +74,7 @@ def wait_owned(
 ) -> tuple[int, str, str]:
     """Bound only the child we started, reusing the provider's process-tree cleanup."""
     try:
-        output, error = process.communicate(timeout=timeout)
+        output, error = communicate(process, timeout)
         code = process.returncode
     except subprocess.TimeoutExpired:
         kill_tree(process)

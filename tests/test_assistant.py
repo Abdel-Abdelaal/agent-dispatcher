@@ -49,6 +49,30 @@ def test_schema_rejects_unknown_action_and_model_approval() -> None:
             Request.model_validate(data)
 
 
+def test_run_evidence_requires_public_repo_and_broker_scoped_lookup(
+    tools: ControllerTools,
+) -> None:
+    fake = runner(tools, PUBLIC, '{"calls":[]}')
+    assert (
+        tools.call(Request(action="inspect_run", repo="app", number=28))
+        == '{"calls":[]}'
+    )
+    argv, _, _, _ = arguments(fake)
+    assert argv[1:] == ["evidence", "28", "--repo", "owner/app"]
+    runner(tools, json.dumps({**json.loads(PUBLIC), "isPrivate": True}))
+    with pytest.raises(ToolError):
+        tools.call(Request(action="inspect_run", repo="app", number=28))
+
+
+def test_run_evidence_failure_never_returns_native_diagnostics(
+    tools: ControllerTools,
+) -> None:
+    fake = Mock(side_effect=[(0, PUBLIC, ""), (1, "private-payload", "host-secret")])
+    tools.runner = fake
+    with pytest.raises(ToolError, match="Could not read"):
+        tools.call(Request(action="inspect_run", repo="app", number=28))
+
+
 @pytest.mark.parametrize("value", ["--public", "../app", "other/app", "app;whoami", ""])
 def test_owned_name_rejects_shell_options_and_other_owners(
     tools: ControllerTools, value: str

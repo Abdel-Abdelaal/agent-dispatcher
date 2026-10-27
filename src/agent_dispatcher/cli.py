@@ -1,6 +1,7 @@
 """Command line: `agent-dispatcher once [--dry-run]`."""
 
 import argparse
+import json
 import os
 import sys
 from collections.abc import Callable, Sequence
@@ -15,6 +16,7 @@ from agent_dispatcher.execute import Outcome, Provider, Run
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import GitHubReader
 from agent_dispatcher.intake import Issue
+from agent_dispatcher.native_evidence import report as evidence_report
 from agent_dispatcher.opencode_worker import MiMoOpenCode
 from agent_dispatcher.providers import (
     ChatApi,
@@ -117,6 +119,7 @@ def providers(settings: Settings) -> dict[str, Provider]:
                 settings.mimo_api_key,
                 settings.opencode_executable,
                 reasoning=settings.mimo_reasoning,
+                checkpoint_root=settings.work_root.resolve() / "checkpoints",
             )
             if settings.mimo_harness == "opencode"
             else mimo_worker(settings.mimo_api_key)
@@ -400,6 +403,22 @@ def failure_notice(settings: Settings) -> Callable[[RunRecord, str], None]:
     return notify
 
 
+def show_evidence(settings: Settings, repo: str, run_id: int) -> int:
+    """Check the run's repository before returning local diagnostic metrics."""
+    queue = RunQueue(settings.db_path)
+    try:
+        record = queue.find_run(run_id)
+        if record is None or record.repo != repo:
+            sys.stderr.write("Run not found for this repository.\n")
+            return 1
+        data = evidence_report(settings.work_root.resolve(), record.id)
+        data.update(run_id=record.id, issue=record.number, outcome=record.outcome)
+        sys.stdout.write(json.dumps(data) + "\n")
+        return 0
+    finally:
+        queue.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one cycle: plan, then (unless --dry-run) execute the next task."""
     parser = argparse.ArgumentParser(prog="agent-dispatcher")
@@ -407,11 +426,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     once = commands.add_parser("once", help="run one poll cycle")
     once.add_argument("--dry-run", action="store_true", help="plan without running")
     commands.add_parser("status", help="show waiting tasks, parked models, runs")
+    evidence = commands.add_parser("evidence", help="inspect payload-free run metrics")
+    evidence.add_argument("number", type=int)
+    evidence.add_argument("--repo", required=True)
     commands.add_parser(
         "supervise", help="run one cycle with an owned process deadline"
     )
     arguments = parser.parse_args(argv)
     settings = Settings()
+    if arguments.command == "evidence":
+        return show_evidence(settings, arguments.repo, arguments.number)
     if arguments.command == "supervise":
         return supervised_cycle(settings, telemetry(settings), failure_notice(settings))
     if arguments.command == "status":
