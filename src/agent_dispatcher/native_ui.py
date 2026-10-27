@@ -7,7 +7,7 @@ import subprocess
 import sys
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from agent_dispatcher.assistant_context import context
 from agent_dispatcher.fleet_mcp import WRITES
@@ -15,6 +15,7 @@ from agent_dispatcher.providers import (
     MIMO_MODEL,
     MIMO_OPENAI,
     Runner,
+    mimo_native_model,
     scrubbed_env,
     subprocess_runner,
 )
@@ -37,6 +38,18 @@ assume a queued task completed. Tasks run serially, not always immediately.
 Use trifecta_inspect_run with repo and run number to diagnose phase outcomes,
 token usage and retained native tool counters. These are local observations,
 not independent proof that the implementation is correct. Inspect actual PR/CI.
+For code review, inspect_pr supplies headRefOid/baseRefOid and CI links. Pass
+headRefOid as head_sha to read_pr_diff/read_ci_errors, and as ref to read_file
+for candidate file context. Take Actions job_id from the actual CI job link,
+never invent it or use an external provider's check ID as an Actions job ID.
+Recheck the PR head before reporting conclusions. Distinguish required CI,
+advisory checks, model opinion and independently executed tests.
+Use read_pr_checks with head_sha to identify required checks. Failed or pending
+checks are returned as data; unavailable classification never means approval.
+Discover public repos and open PRs with list_repos/list_prs instead of requiring
+the owner to know a repository name or PR number before a review can begin.
+Read PR intent and relevant public issue bodies with inspect_pr/inspect_issue;
+do not judge correctness from a diff without understanding the requested behavior.
 You can create repos with trifecta_create_repo (private default), but private
 coding is not enabled. New public repos need enrollment/checks before coding.
 Writes request the owner's approval through the native OpenCode permission UI.
@@ -54,7 +67,11 @@ Be practical, concise and honest about tool failures and remaining limitations.
 
 
 def configuration(
-    root: Path, python: Path, *, read_only: bool = False
+    root: Path,
+    python: Path,
+    *,
+    read_only: bool = False,
+    reasoning: Literal["enabled", "disabled"] = "enabled",
 ) -> dict[str, Any]:
     """Keep only the reviewed MiMo provider and native permission-gated fleet tools."""
     permission: dict[str, str] = {
@@ -92,13 +109,7 @@ def configuration(
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "MiMo",
                 "options": {"baseURL": MIMO_OPENAI, "apiKey": "{env:WORKER_API_KEY}"},
-                "models": {
-                    MIMO_MODEL: {
-                        "name": "MiMo v2.6 Flash",
-                        "options": {"thinking": {"type": "disabled"}},
-                        "limit": {"context": 196608, "output": 8192},
-                    }
-                },
+                "models": {MIMO_MODEL: mimo_native_model(reasoning)},
             }
         },
         "mcp": {
@@ -130,7 +141,9 @@ def environment(root: Path, settings: Settings) -> dict[str, str]:
     for name in ("CONFIG", "DATA", "CACHE", "STATE"):
         env[f"XDG_{name}_HOME"] = str(directory / name.lower())
     env.update(
-        OPENCODE_CONFIG_CONTENT=json.dumps(configuration(root, Path(sys.executable))),
+        OPENCODE_CONFIG_CONTENT=json.dumps(
+            configuration(root, Path(sys.executable), reasoning=settings.mimo_reasoning)
+        ),
         OPENCODE_DISABLE_PROJECT_CONFIG="1",
         OPENCODE_TEST_HOME=str(directory / "home"),
         OPENCODE_DISABLE_AUTOUPDATE="1",

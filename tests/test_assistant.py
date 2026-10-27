@@ -49,6 +49,76 @@ def test_schema_rejects_unknown_action_and_model_approval() -> None:
             Request.model_validate(data)
 
 
+@pytest.mark.parametrize("field", ["ref", "head_sha"])
+def test_commit_reference_rejects_shell_options_and_branch_names(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Request.model_validate({"action": "read_file", field: "main;whoami"})
+
+
+def test_public_file_can_be_read_at_candidate_sha(tools: ControllerTools) -> None:
+    fake = runner(
+        tools,
+        PUBLIC,
+        json.dumps(
+            {
+                "encoding": "base64",
+                "size": 5,
+                "content": base64.b64encode(b"hello").decode(),
+            }
+        ),
+    )
+    assert tools.call(Request(action="read_file", repo="app", ref="a" * 40)) == "hello"
+    assert (
+        arguments(fake)[0][-1] == "repos/owner/app/contents/README.md?ref=" + "a" * 40
+    )
+
+
+def test_failing_required_checks_are_data_but_other_gh_failures_stay_errors(
+    tools: ControllerTools,
+) -> None:
+    head = "a" * 40
+    metadata = json.dumps({"headRefOid": head, "baseRefOid": "b" * 40})
+    checks = json.dumps([{"name": "Types", "state": "FAILURE"}])
+    tools.runner = Mock(
+        side_effect=[
+            (0, PUBLIC, ""),
+            (0, metadata, ""),
+            (1, checks, ""),
+            (0, metadata, ""),
+        ]
+    )
+    result = json.loads(
+        tools.call(
+            Request(action="read_pr_checks", repo="app", number=5, head_sha=head)
+        )
+    )
+    assert result["required_checks"][0]["state"] == "FAILURE"
+    tools.runner = Mock(
+        side_effect=[
+            (0, PUBLIC, ""),
+            (0, metadata, ""),
+            (4, "private diagnostic", "host-secret"),
+        ]
+    )
+    with pytest.raises(ToolError, match="GitHub operation failed"):
+        tools.call(
+            Request(action="read_pr_checks", repo="app", number=5, head_sha=head)
+        )
+
+
+@pytest.mark.parametrize("action", ["read_pr_diff", "read_pr_checks", "read_ci_errors"])
+def test_review_evidence_keeps_public_gate_and_static_missing_sha_error(
+    tools: ControllerTools, action: str
+) -> None:
+    request = Request.model_validate({"action": action, "repo": "app"})
+    runner(tools, PUBLIC)
+    with pytest.raises(ToolError, match="full head"):
+        tools.call(request)
+    runner(tools, json.dumps({**json.loads(PUBLIC), "isPrivate": True}))
+    with pytest.raises(ToolError, match="Private"):
+        tools.call(request)
+
+
 def test_run_evidence_requires_public_repo_and_broker_scoped_lookup(
     tools: ControllerTools,
 ) -> None:
@@ -110,17 +180,35 @@ def test_public_discovery_filters_private_and_inactive_names(
     assert "secret" not in result
 
 
-@pytest.mark.parametrize("action", ["inspect_repo", "list_work", "inspect_pr"])
+@pytest.mark.parametrize(
+    "action", ["inspect_repo", "list_work", "list_prs", "inspect_pr", "inspect_issue"]
+)
 def test_public_metadata_tools_are_structured_read_calls(
     tools: ControllerTools, action: str
 ) -> None:
-    fake = runner(tools, PUBLIC, "actual-result")
+    fake = runner(tools, PUBLIC, '{"title": "actual-result"}')
     assert (
         tools.call(Request.model_validate({"action": action, "repo": "app"}))
-        == "actual-result"
+        == '{"title": "actual-result"}'
     )
     assert arguments(fake)[0][0] == "gh"
     assert "owner/app" in arguments(fake)[0]
+
+
+@pytest.mark.parametrize("action", ["inspect_pr", "inspect_issue"])
+def test_task_intent_is_redacted_and_explicitly_byte_bounded(
+    tools: ControllerTools, action: str
+) -> None:
+    token = "ghp_" + "a" * 36
+    runner(
+        tools, PUBLIC, json.dumps({"title": "task", "body": token + "\n" + "é" * 32000})
+    )
+    result = json.loads(
+        tools.call(Request.model_validate({"action": action, "repo": "app"}))
+    )
+    assert token not in result["body"]
+    assert result["body_truncated"] is True
+    assert len(result["body"].encode("utf-8")) <= 32000
 
 
 def test_search_query_cannot_turn_into_a_cli_flag(tools: ControllerTools) -> None:

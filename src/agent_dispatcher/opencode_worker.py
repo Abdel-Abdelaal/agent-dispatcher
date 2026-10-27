@@ -18,6 +18,7 @@ from agent_dispatcher.providers import (
     Runner,
     RunResult,
     Tuning,
+    mimo_native_model,
     provider_result,
     scrubbed_env,
     subprocess_runner,
@@ -99,13 +100,10 @@ class MiMoOpenCode:
             plugin=[],
             lsp=False,
             formatter=False,
+            compaction={"auto": True, "prune": True},
         )
         model = config["provider"]["worker"]["models"][MIMO_MODEL]
-        model["reasoning"] = True
-        model["interleaved"] = {"field": "reasoning_content"}
-        model["options"] = {
-            "thinking": {"type": self.reasoning},
-        }
+        model.update(mimo_native_model(self.reasoning))
         # Explicitly override built-in agent defaults as well as global policy.
         # Otherwise a built-in permission (for example questions) can take precedence.
         config["agent"]["build"]["permission"] = config["permission"]

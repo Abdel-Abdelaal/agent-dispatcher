@@ -56,6 +56,8 @@ def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
         model = config["provider"]["worker"]["models"]["mimo-v2.6-flash"]
         assert model["reasoning"] is True
         assert model["interleaved"] == {"field": "reasoning_content"}
+        assert model["limit"] == {"context": 196608, "output": 32000}
+        assert config["compaction"] == {"auto": True, "prune": True}
         assert config["provider"]["worker"]["models"]["mimo-v2.6-flash"]["options"] == {
             "thinking": {"type": "enabled"},
         }
