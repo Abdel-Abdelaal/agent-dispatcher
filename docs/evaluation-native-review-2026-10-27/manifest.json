@@ -26,7 +26,7 @@
   "write_requests": 0,
   "write_approvals": 0,
   "reference_sha256": "cb09f7c9489ceb8ea9ee777e2ae0b37d732ffe23a779982c54ec8f292f1ea8ef",
-  "verdict_sha256": "6c1824ddfd47f30aa8b05e4348d3cf8850fc4a9baec0ff4d7283a8f1a59ab915",
+  "verdict_sha256": "9692256f44d478b29ab1972f34f1c3ca4567929cb1709408ff2136a97210421e",
   "oracle": {
     "source": "\"\"\"Check the suggested expression independently; do not patch the candidate.\"\"\"\nfrom __future__ import annotations\n\nimport json\n\n\ndef decode(body: bytes | memoryview[int]) -> object:\n    return json.loads(bytes(body))\n\n\nassert decode(b'{\"status\":499}') == {\"status\": 499}\nassert decode(memoryview(b'{\"status\":599}')) == {\"status\": 599}\nprint('Both bytes and memoryview inputs decode correctly.')",
     "result": "bytes and memoryview inputs passed runtime assertions; strict Pyright Python 3.12: zero errors"
@@ -38,5 +38,7 @@
     "Raw native state, reasoning and tool payloads remain private.",
     "Hosted signatures attest ingestion, not independent local execution.",
     "Ordinary native conversations are not automatically publicly exported."
-  ]
+  ],
+  "frozen_reference_sha256": "cb09f7c9489ceb8ea9ee777e2ae0b37d732ffe23a779982c54ec8f292f1ea8ef",
+  "format_note": "Public files use LF and a final newline. frozen_reference_sha256 identifies the original pre-call bytes; reference_sha256 and verdict_sha256 identify the published files. JSON values are unchanged."
 }
