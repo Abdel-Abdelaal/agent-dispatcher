@@ -29,9 +29,24 @@ if ($lastIntake.Trim() -ne $intakeDay -and (Test-Path -LiteralPath 'D:\showcase\
 # (uv's warnings) into errors, and Set-Location doesn't move child processes.
 $out = Join-Path $runs 'last-stdout.log'
 $err = Join-Path $runs 'last-stderr.log'
-$process = Start-Process -FilePath $exe -ArgumentList 'supervise' `
-    -WorkingDirectory $repo -RedirectStandardOutput $out -RedirectStandardError $err `
-    -WindowStyle Hidden -Wait -PassThru
+. (Join-Path $PSScriptRoot 'cycle-awake.ps1')
+$previousPowerState = [uint32]0
+try {
+    $previousPowerState = Start-CycleAwake
+    if ($previousPowerState -eq 0) { throw 'Windows refused the idle-sleep request.' }
+} catch {
+    Add-Content -Path $log -Value 'Could not prevent idle sleep; cycle deadline still applies.'
+}
+try {
+    $process = Start-Process -FilePath $exe -ArgumentList 'supervise' `
+        -WorkingDirectory $repo -RedirectStandardOutput $out -RedirectStandardError $err `
+        -WindowStyle Hidden -Wait -PassThru
+} finally {
+    if ($previousPowerState -ne 0) {
+        $restored = Stop-CycleAwake -PreviousState $previousPowerState
+        if ($restored -eq 0) { Add-Content -Path $log -Value 'Windows refused power-state restoration.' }
+    }
+}
 Get-Content $out, $err | Add-Content -Path $log
 # Export only allowlisted, scrubbed public telemetry through reviewed platform code.
 # Pending batches are acknowledged only after hosted signature verification.
