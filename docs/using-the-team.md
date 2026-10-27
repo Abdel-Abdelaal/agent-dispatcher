@@ -193,3 +193,7 @@ Native OpenCode diagnostic state remains local and confidential. Ask the native
 assistant to inspect a run by repository and run number; see the
 [run evidence guide](native-run-evidence.md). Raw state is not a public export
 and does not yet provide validated automatic conversation resume.
+
+For candidate review, the native assistant can discover open PRs, read exact
+commit diffs/files and task intent, identify required checks, and fetch the
+matching Actions error lines. See [PR review tools](pr-review-tools.md).

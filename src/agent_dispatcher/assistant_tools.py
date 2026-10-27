@@ -10,10 +10,11 @@ from typing import Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_dispatcher import pr_review
 from agent_dispatcher.providers import Runner
 from agent_dispatcher.telemetry import redact
 
-MAX_FILE = 32000
+MAX_FILE = pr_review.MAX_TEXT
 
 
 class ToolError(RuntimeError):
@@ -34,7 +35,12 @@ class Request(BaseModel):
         "inspect_repo",
         "read_file",
         "list_work",
+        "list_prs",
         "inspect_pr",
+        "inspect_issue",
+        "read_pr_diff",
+        "read_pr_checks",
+        "read_ci_errors",
         "search_repos",
         "status",
         "inspect_run",
@@ -48,6 +54,9 @@ class Request(BaseModel):
     title: str = Field(default="", max_length=120)
     path: str = Field(default="README.md", max_length=250)
     number: int = Field(default=1, ge=1)
+    head_sha: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
+    ref: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
+    job_id: int = Field(default=0, ge=0)
     visibility: Literal["private", "public"] = "private"
 
 
@@ -61,7 +70,7 @@ class ControllerTools:
     environ: Mapping[str, str]
     approve: Callable[[str], bool]
 
-    def gh(self, *args: str, stdin: str = "") -> str:
+    def gh(self, *args: str, stdin: str = "", allow_codes: tuple[int, ...] = ()) -> str:
         """Execute structured gh arguments; suppress native error bodies."""
         code, output, _error = self.runner(
             ["gh", *args],
@@ -69,7 +78,7 @@ class ControllerTools:
             stdin,
             self.environ,
         )
-        if code:
+        if code and code not in allow_codes:
             fail("GitHub operation failed; do not assume it completed.")
         return output.strip()
 
@@ -243,45 +252,85 @@ class ControllerTools:
     def read(self, request: Request) -> str:
         """Read bounded public repository metadata or text files."""
         repo = self.public(request.repo)
-        if request.action == "inspect_repo":
+        if request.action in {"inspect_repo", "inspect_pr", "inspect_issue"}:
+            return self.describe(request, repo)
+        if request.action in {"list_work", "list_prs"}:
+            command, fields = {
+                "list_work": ("issue", "number,title,url,labels"),
+                "list_prs": (
+                    "pr",
+                    "number,title,url,isDraft,headRefOid,headRefName,labels,updatedAt",
+                ),
+            }[request.action]
             return self.gh(
-                "repo",
-                "view",
-                repo,
-                "--json",
-                "nameWithOwner,description,url,defaultBranchRef",
-            )
-        if request.action == "list_work":
-            return self.gh(
-                "issue",
+                command,
                 "list",
                 "--repo",
                 repo,
                 "--limit",
                 "20",
                 "--json",
-                "number,title,url,labels",
+                fields,
             )
-        if request.action == "inspect_pr":
-            return self.gh(
-                "pr",
-                "view",
-                str(request.number),
-                "--repo",
-                repo,
-                "--json",
-                "number,title,url,isDraft,statusCheckRollup,files",
-            )
+        if request.action in {"read_pr_diff", "read_pr_checks", "read_ci_errors"}:
+            return self.review(request, repo)
         path = PurePosixPath(request.path)
         if (
             path.is_absolute()
             or ".." in path.parts
             or "\\" in request.path
             or not re.fullmatch(r"[A-Za-z0-9_./-]+", request.path)
-            or any(part.startswith(".env") for part in path.parts)
+            or pr_review.secret_path(request.path)
         ):
             fail("Use a relative public repository file path.")
-        data = json.loads(self.gh("api", f"repos/{repo}/contents/{path.as_posix()}"))
+        endpoint = f"repos/{repo}/contents/{path.as_posix()}"
+        if request.ref:
+            endpoint += "?ref=" + request.ref
+        data = json.loads(self.gh("api", endpoint))
         if data.get("encoding") != "base64" or data.get("size", 0) > MAX_FILE:
             fail("Use a text file smaller than32KB.")
         return redact(base64.b64decode(data["content"]).decode("utf-8"), ())[0]
+
+    def review(self, request: Request, repo: str) -> str:
+        """Read SHA-bound evidence after the caller passed public repository policy."""
+        try:
+            if request.action == "read_pr_diff":
+                return pr_review.diff(self.gh, repo, request.number, request.head_sha)
+            if request.action == "read_pr_checks":
+                return pr_review.checks(self.gh, repo, request.number, request.head_sha)
+            return pr_review.ci_errors(
+                self.gh, repo, request.number, request.head_sha, request.job_id
+            )
+        except pr_review.ReviewError as error:
+            fail(str(error))
+
+    def describe(self, request: Request, repo: str) -> str:
+        """Return public task intent/metadata with redacted, bounded text fields."""
+        if request.action == "inspect_repo":
+            output = self.gh(
+                "repo",
+                "view",
+                repo,
+                "--json",
+                "nameWithOwner,description,url,defaultBranchRef",
+            )
+        else:
+            command, fields = {
+                "inspect_pr": (
+                    "pr",
+                    "number,title,body,url,isDraft,headRefOid,baseRefOid,"
+                    "headRefName,statusCheckRollup,files",
+                ),
+                "inspect_issue": ("issue", "number,title,body,url,labels"),
+            }[request.action]
+            output = self.gh(
+                command, "view", str(request.number), "--repo", repo, "--json", fields
+            )
+        data = json.loads(output)
+        for key in ("title", "body", "description"):
+            if isinstance(data.get(key), str):
+                text = redact(data[key], ())[0].encode("utf-8")
+                data[key] = text[:MAX_FILE].decode("utf-8", "ignore")
+                if len(text) > MAX_FILE:
+                    data[key + "_truncated"] = True
+        return json.dumps(data)

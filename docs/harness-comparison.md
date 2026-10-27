@@ -33,8 +33,8 @@ wall-clock timeout bound each invocation; no paid capacity is provisioned.
 
 The MiMo OpenCode adapter makes reasoning explicit and configurable with
 `DISPATCHER_MIMO_REASONING=enabled` (default) or `disabled`. The enabled default
-preserves MiMo's normal reasoning behavior. The interactive front end's faster
-non-reasoning mode and the 14.922-second file-tool smoke do not establish which
+preserves MiMo's normal reasoning behavior. Earlier non-reasoning front-end probes and the 14.922-second file-tool smoke
+do not establish which
 mode produces better application code. Record the mode in each evaluation;
 compare correctness, reuse, regressions and usage as well as elapsed time.
 
@@ -81,3 +81,16 @@ result normalization. No upstream implementation is copied.
 The latter two frameworks are not installed by this change. Verify exact licenses
 and required notices before any future code reuse. Existing CLI attribution and
 dependency license obligations remain in place.
+
+The native conversational reviewer and native worker now share the same model
+capability metadata and explicit reasoning setting. Both default to enabled;
+`DISPATCHER_MIMO_REASONING=disabled` is an explicit comparison setting. The
+native working budgets are196,608 context tokens and32,000 output tokens per
+reply, including reasoning. They are conservative harness budgets, not the
+model's advertised maxima. The worker previously omitted these limits, allowing
+custom-provider metadata to default to zero in the pinned OpenCode implementation.
+Compaction/pruning is explicit. This fixes configuration consistency; it does
+not establish the cause of the earlier timeout or prove long-task correctness.
+[Xiaomi's model limits](https://mimo.mi.com/docs/en-US/quick-start/model) are1M
+context and128K maximum output; generation limits include reasoning as described
+in the [API reference](https://mimo.mi.com/docs/api/text-generation/openai-api).

@@ -163,6 +163,19 @@ def test_read_only_native_probe_denies_writes_in_client_and_server(
     assert "--native-ui" not in config["mcp"]["trifecta"]["command"]
 
 
+@pytest.mark.parametrize("reasoning", ["enabled", "disabled"])
+def test_native_review_respects_reasoning_setting_and_worker_context_budget(
+    tmp_path: Path, reasoning: str
+) -> None:
+    settings = Settings.model_validate({"mimo_reasoning": reasoning})
+    env = native_ui.environment(tmp_path, settings)
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    model = config["provider"]["worker"]["models"]["mimo-v2.6-flash"]
+    assert model["options"]["thinking"]["type"] == reasoning
+    assert model["interleaved"] == {"field": "reasoning_content"}
+    assert model["limit"] == {"context": 196608, "output": 32000}
+
+
 def test_native_environment_has_no_other_provider_or_github_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

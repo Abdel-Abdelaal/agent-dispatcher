@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import httpx
 from pydantic import SecretStr
@@ -589,6 +589,17 @@ MIMO_ANTHROPIC = "https://token-plan-ams.xiaomimimo.com/anthropic"
 MIMO_MODEL = "mimo-v2.6-flash"
 NVIDIA_OPENAI = "https://integrate.api.nvidia.com/v1"
 NVIDIA_MODEL = "z-ai/glm-5.3-flash"
+
+
+def mimo_native_model(reasoning: Literal["enabled", "disabled"]) -> dict[str, object]:
+    """Share explicit reasoning/context budgets between native chat and work."""
+    return {
+        "name": "MiMo v2.6 Flash",
+        "reasoning": True,
+        "interleaved": {"field": "reasoning_content"},
+        "options": {"thinking": {"type": reasoning}},
+        "limit": {"context": 196608, "output": 32000},
+    }
 
 
 def mimo(api_key: SecretStr) -> ChatApi:
