@@ -6,6 +6,15 @@ the owner is signed in. Use the scheduled task for live runs: it also performs
 trusted audit intake and sends scrubbed telemetry. The bare Python command does
 not perform those host integration steps.
 
+During a supervised cycle the Windows host requests protection from automatic
+idle sleep, then restores its prior thread state in `finally`. The request also
+ends when that host process exits. It does not keep the display on, change power
+plans, override manual sleep/lid actions or provide an always-on server. If Windows
+refuses the request, the host logs that fact and retains its existing deadline.
+Sleep still counts toward the wall-clock deadline; an interrupted task is retained
+and reported, not automatically retried or resumed. See Microsoft's
+[execution-state API](https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate).
+
 ## Give it work
 
 Tell the assistant the repository, one small outcome and how to verify it:
