@@ -517,9 +517,91 @@ def test_a_planner_who_finds_it_harder_plans_again_on_opus(
         Tuning("claude-opus-5-5", "high"),
     ]
     assert "1. Deep plan" in worker.prompts[0][0]
+    assert "PRIOR_PLAN" in planner.prompts[1][0]
+    assert "1. Quick plan" in planner.prompts[1][0]
     assert "DIFFICULTY" not in worker.prompts[0][0]
     assert reviewer.tunings == [Tuning("gpt-6-astra", "high")]
     assert run.level is Level.HARD
+
+
+@pytest.mark.parametrize(
+    "reply", ["not JSON", "{}", '{"proceed":"true"}', '{"proceed":1}']
+)
+def test_malformed_triage_stops_before_model_work(
+    tmp_path: Path, origin: Path, reply: str
+):
+    planner, worker, reviewer = models([], [])
+    run = team_run(
+        tmp_path, origin, (planner, worker, reviewer), FakeGh(), triage=reply
+    )
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.FAILED
+    assert not planner.prompts
+    assert not worker.prompts
+    assert not reviewer.prompts
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert records[-1]["outcome"] == "invalid_json"
+
+
+@pytest.mark.parametrize(
+    "reply", ["DIFFICULTY: hard\n", "DIFFICULTY: hard\nREFUSE: unsafe"]
+)
+def test_invalid_plan_never_refines_or_starts_work(
+    tmp_path: Path, origin: Path, reply: str
+):
+    planner = FakeModel("claude", [reply])
+    worker = FakeModel("mimo")
+    reviewer = FakeModel("codex")
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.FAILED
+    assert len(planner.prompts) == 1
+    assert not worker.prompts
+    assert not reviewer.prompts
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert records[-1]["outcome"] == (
+        "refused" if "REFUSE:" in reply else "invalid_plan"
+    )
+
+
+def test_same_mimo_model_keeps_its_completed_harder_plan(tmp_path: Path, origin: Path):
+    model = FakeModel(
+        "mimo",
+        ["DIFFICULTY: hard\n1. Reuse this plan", "implemented", APPROVE],
+        [{"a.md": "x\n"}],
+    )
+    run = team_run(tmp_path, origin, (model, model, model), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert len(model.prompts) == 3
+    assert "1. Reuse this plan" in model.prompts[1][0]
+    assert model.tunings == [None, None, None]
+    assert run.level is Level.HARD
+
+
+def test_mimo_triage_requests_json_object_without_live_inference():
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["response_format"] == {"type": "json_object"}
+        assert body["thinking"] == {"type": "disabled"}
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"proceed":true}'}}]}
+        )
+
+    settings = Settings(mimo_api_key=SecretStr("fake"), nvidia_api_key=None)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        screen = cli.triage(settings, client)
+        assert screen is not None
+        assert json.loads(screen("Reply as JSON", "task")) == {"proceed": True}
 
 
 def test_a_planner_who_finds_it_easier_lowers_the_review(

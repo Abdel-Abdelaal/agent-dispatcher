@@ -67,6 +67,11 @@ Long coding work is real background work: the assistant queues an issue and star
 the existing scheduler, then uses status and PR checks to report actual progress.
 The separate planner, worker and reviewer retain the same gates. With MiMo-only
 fallback, those roles use separate MiMo calls, not three independent providers.
+If the planner rates a task harder but its model and effort stay the same, the
+controller keeps that completed plan instead of spending another call repeating
+it. A stronger-model refinement receives the previous plan. Empty plans, refusals
+and malformed triage decisions stop before coding; an unavailable optional triage
+service retains the existing skip behavior. These checks do not guarantee quality.
 Repo creation defaults to private. Private autonomous coding remains unavailable;
 new public repos still need fleet enrollment/checks before coverage is assumed.
 

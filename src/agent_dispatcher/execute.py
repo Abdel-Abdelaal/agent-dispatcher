@@ -173,6 +173,8 @@ def json_reply(text: str) -> dict[str, object] | None:
 def _plan_verdict(text: str) -> str:
     """Name a plan reply's outcome for telemetry."""
     _, plan = split_rating(text)
+    if not plan.strip():
+        return "invalid_plan"
     return "refused" if plan.upper().startswith("REFUSE:") else "ok"
 
 
@@ -391,17 +393,30 @@ class Run:
             self._record("triage", "triage", outcome="unavailable", **base)
             return
         verdict = json_reply(reply)
-        declined = verdict is not None and verdict.get("proceed") is False
-        rated = parse_level(verdict.get("difficulty")) if verdict else None
+        if verdict is None or type(verdict.get("proceed")) is not bool:
+            self._record(
+                "triage",
+                "triage",
+                outcome="invalid_json",
+                **base,
+                **self._output(reply),
+            )
+            raise Stop(
+                self._failure(
+                    "Triage returned an invalid decision; no plan or work started."
+                )
+            )
+        declined = verdict["proceed"] is False
+        rated = parse_level(verdict.get("difficulty"))
         self.level = rated or self.level
         outcome = "declined" if declined else "proceed"
         self._record("triage", "triage", outcome=outcome, **base, **self._output(reply))
-        if declined and verdict is not None:
+        if declined:
             raise Stop(self._failure(f"Triage declined: {verdict.get('reason', '')}"))
         self.notes.append(f"Triage: proceed, rated {self.level.label}.")
 
     def _plan(self, clone: Path) -> str:
-        """Plan at the current level; plan again once if the planner rates it harder."""
+        """Keep a completed plan; refine only when model/effort actually changes."""
         if (
             self.skip_easy_docs_plan
             and self.level is Level.EASY
@@ -425,29 +440,45 @@ class Run:
                 verdict=_plan_verdict,
             )
         )
+        self._check_plan(plan)
         if rating is not None and rating > planned_at:
+            previous_tuning = self._tuning(self.team.planner)
             self.level = rating
-            self.notes.append(
-                f"Planner rated it {rating.label}, so it planned again at that level."
-            )
-            rating, plan = split_rating(
-                self._step(
-                    self.team.planner,
-                    "planning",
-                    prompt,
-                    clone,
-                    read_only=True,
-                    kind="plan",
-                    context=issue_hash,
-                    verdict=_plan_verdict,
+            if self._tuning(self.team.planner) == previous_tuning:
+                self.notes.append(
+                    f"Planner rated it {rating.label}; keeping its completed plan."
                 )
-            )
+            else:
+                self.notes.append(
+                    f"Planner rated it {rating.label}, "
+                    "so it planned again at that level."
+                )
+                rating, plan = split_rating(
+                    self._step(
+                        self.team.planner,
+                        "planning",
+                        prompt + "\nRefine this completed plan at the new level; "
+                        "preserve useful work and recheck context where needed.\n"
+                        + _fenced("PRIOR_PLAN", plan),
+                        clone,
+                        read_only=True,
+                        kind="plan",
+                        context={**issue_hash, "prior_plan": sha256(plan)},
+                        verdict=_plan_verdict,
+                    )
+                )
+                self._check_plan(plan)
         elif rating is not None and rating != planned_at:
             self.level = rating
             self.notes.append(f"Planner rated it {rating.label}.")
+        return plan
+
+    def _check_plan(self, plan: str) -> None:
+        """Stop empty plans and refusals before spending more model work."""
+        if not plan.strip():
+            raise Stop(self._failure("The planner returned an empty plan."))
         if plan.upper().startswith("REFUSE:"):
             raise Stop(self._failure(f"The planner refused: {plan[7:].strip()}"))
-        return plan
 
     def _implement(self, clone: Path, plan: str, findings: str = "") -> None:
         prompt = f"{IMPLEMENT}\n{_fenced('PLAN', plan)}\n"

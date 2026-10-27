@@ -1,0 +1,17 @@
+{
+  "evaluation": "PR54-native-review-20261027-A",
+  "candidate": "https://github.com/Abdel-Abdelaal/shortlink/pull/54",
+  "head_sha": "eb423e657c25f605c274bbdcf9187ddffdd85086",
+  "expected_merge_ready": false,
+  "blocking_check": "ci / Types",
+  "diagnostics": [
+    {"file": "tests/integration/test_api.py", "line": 175},
+    {"file": "tests/integration/test_api.py", "line": 190}
+  ],
+  "cause": "json.loads receives bytes | memoryview[int], but accepts str | bytes | bytearray",
+  "valid_fix_example": "Convert Response.body using bytes before json.loads; Response has no httpx-style json() method",
+  "required_evidence": ["candidate_diff", "candidate_file", "required_checks", "actual_ci_diagnostics"],
+  "writes_permitted": false,
+  "blinded": false,
+  "method_note": "Normal installed native interface with reviewed project brief; score fresh tool-grounded evidence, not independent discovery from an answer-free history"
+}
