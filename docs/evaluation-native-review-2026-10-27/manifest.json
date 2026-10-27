@@ -1,0 +1,42 @@
+{
+  "evaluation": "PR54-native-review-20261027-A",
+  "controller_revision": "5f927c5541b1cb8b60bd306a87f8601e32ef7f90",
+  "candidate": "https://github.com/Abdel-Abdelaal/shortlink/pull/54",
+  "candidate_head": "eb423e657c25f605c274bbdcf9187ddffdd85086",
+  "record_id": "95b6abd7-fb01-4f9c-929a-13281368a891",
+  "duration_ms": 167436,
+  "visible_usage": {
+    "input_tokens": 31556,
+    "output_tokens": 1444,
+    "reasoning_tokens": 2824,
+    "cache_read_tokens": 88704,
+    "cache_write_tokens": 0
+  },
+  "completed_tools": {
+    "inspect_pr": 2,
+    "inspect_issue": 1,
+    "list_prs": 1,
+    "read_pr_diff": 1,
+    "read_pr_checks": 1,
+    "read_ci_errors": 2,
+    "read_file": 2
+  },
+  "result": "matched reference on this bounded review",
+  "blinded": false,
+  "write_requests": 0,
+  "write_approvals": 0,
+  "reference_sha256": "cb09f7c9489ceb8ea9ee777e2ae0b37d732ffe23a779982c54ec8f292f1ea8ef",
+  "verdict_sha256": "6c1824ddfd47f30aa8b05e4348d3cf8850fc4a9baec0ff4d7283a8f1a59ab915",
+  "oracle": {
+    "source": "\"\"\"Check the suggested expression independently; do not patch the candidate.\"\"\"\nfrom __future__ import annotations\n\nimport json\n\n\ndef decode(body: bytes | memoryview[int]) -> object:\n    return json.loads(bytes(body))\n\n\nassert decode(b'{\"status\":499}') == {\"status\": 499}\nassert decode(memoryview(b'{\"status\":599}')) == {\"status\": 599}\nprint('Both bytes and memoryview inputs decode correctly.')",
+    "result": "bytes and memoryview inputs passed runtime assertions; strict Pyright Python 3.12: zero errors"
+  },
+  "limitations": [
+    "Prior project brief contained generic failed-types context; not blinded.",
+    "No candidate code changed or merged; Types still fails on the candidate.",
+    "Visible counters may omit auxiliary or incomplete requests; no dollar estimate.",
+    "Raw native state, reasoning and tool payloads remain private.",
+    "Hosted signatures attest ingestion, not independent local execution.",
+    "Ordinary native conversations are not automatically publicly exported."
+  ]
+}

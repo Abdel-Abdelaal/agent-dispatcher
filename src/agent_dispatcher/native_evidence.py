@@ -27,6 +27,9 @@ _CATEGORIES = {
         "error",
     },
     "outcome": {
+        "invalid_plan",
+        "invalid_json",
+        "declined",
         "ok",
         "failed",
         "timed_out",

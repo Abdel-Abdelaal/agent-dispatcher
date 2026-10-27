@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -140,6 +141,13 @@ def triage(
     chat: ChatApi | None = None
     if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         chat = mimo(settings.mimo_api_key)
+        chat = replace(
+            chat,
+            extra_body={
+                **(chat.extra_body or {}),
+                "response_format": {"type": "json_object"},
+            },
+        )
     elif settings.nvidia_api_key and "nvidia" not in settings.disabled_providers:
         chat = nvidia(settings.nvidia_api_key)
     if chat is None:
