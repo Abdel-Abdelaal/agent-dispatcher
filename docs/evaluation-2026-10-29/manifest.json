@@ -1,0 +1,468 @@
+{
+  "evaluation": "HEAD-20261029",
+  "controller_revision": "f9f37213fb12e70b19b0d6d4b5ee335b240c89bc",
+  "baseline_sha": "d142d64742f0132d5f57471326cc7a6300651721",
+  "acceptance_sha256": "0f7c911154dd3fd8a9afa8445c678ceab429118a41e82d91aa85b973e85ac669",
+  "legacy": {
+    "run_id": 32,
+    "issue": 62,
+    "harness": "claude-code",
+    "outcome": "plan_timed_out",
+    "duration_ms": 1200158,
+    "requested_native_reasoning_setting": "enabled",
+    "legacy_cli_max_thinking_tokens": "0",
+    "effective_server_reasoning": "unverified; client can omit parameter",
+    "candidate_pr": null
+  },
+  "native": {
+    "run_id": 33,
+    "issue": 63,
+    "harness": "opencode",
+    "reasoning": "enabled",
+    "cycle_timeout_seconds": 3600,
+    "outcome": "cycle_timeout_during_final_review",
+    "candidate_pr": null,
+    "final_native_verdict": null,
+    "initial_snapshot": {
+      "kind": "pre-review controller-gated snapshot",
+      "base": "d142d64742f0132d5f57471326cc7a6300651721",
+      "patch_sha256": "4576499236dbd5c708be584688e69527bc306fe05bdbcc31a42ac88030ca4422",
+      "evaluator_modifications": false,
+      "note": "Exact controller-gated patch applied unchanged to an isolated evaluation checkout; agent/reviewer workspace untouched."
+    },
+    "repaired_snapshot": {
+      "kind": "second controller-gated snapshot",
+      "base": "d142d64742f0132d5f57471326cc7a6300651721",
+      "patch_sha256": "15f38f4650f57e6df81b69979ba6271146e39ebdaf00d7ac7d8e874962dd5aec",
+      "evaluator_modifications": false
+    },
+    "initial_checks": [
+      {
+        "check": "acceptance",
+        "exit_code": 0
+      },
+      {
+        "check": "native_tests",
+        "exit_code": 0
+      },
+      {
+        "check": "lint",
+        "exit_code": 0
+      },
+      {
+        "check": "format",
+        "exit_code": 0
+      },
+      {
+        "check": "types",
+        "exit_code": 0
+      }
+    ],
+    "repaired_checks": [
+      {
+        "check": "acceptance",
+        "exit_code": 0
+      },
+      {
+        "check": "native_tests",
+        "exit_code": 0
+      },
+      {
+        "check": "lint",
+        "exit_code": 0
+      },
+      {
+        "check": "format",
+        "exit_code": 0
+      },
+      {
+        "check": "types",
+        "exit_code": 0
+      },
+      {
+        "check": "protocol",
+        "exit_code": 1
+      }
+    ],
+    "initial_protocol": {
+      "passed": 0,
+      "failed": 5
+    },
+    "repaired_protocol": {
+      "passed": 2,
+      "failed": 3
+    },
+    "github_candidate_ci": "not run; no published PR"
+  },
+  "records": [
+    {
+      "record_id": "39699cd9-dd68-4d84-aade-720f9768cf9b",
+      "recorded_at": "2026-10-29T17:28:18.708653+00:00",
+      "run_id": 31,
+      "issue": 39,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "claude"
+    },
+    {
+      "record_id": "a7b157a3-ece6-4340-b3c4-cc23bcc3add2",
+      "recorded_at": "2026-10-29T17:28:18.711919+00:00",
+      "run_id": 31,
+      "issue": 39,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "codex"
+    },
+    {
+      "record_id": "5550e926-a7c0-4db7-80ad-96c572e74cf9",
+      "recorded_at": "2026-10-29T17:28:18.712919+00:00",
+      "run_id": 31,
+      "issue": 39,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "nvidia"
+    },
+    {
+      "record_id": "d237cdd9-3909-47fe-8769-18dd92b8f6fa",
+      "recorded_at": "2026-10-29T17:28:32.010287+00:00",
+      "run_id": 31,
+      "issue": 39,
+      "stage": "triage",
+      "outcome": "proceed",
+      "harness": "chat-api",
+      "provider": "triage",
+      "model": "mimo-v2.6-flash",
+      "usage": null,
+      "prompt_sha256": "b83a5204cdd5f6a5f1a63733504c5d8795cd2dc0b4fadea3acb5e74c9d84aec7",
+      "output_sha256": "b662d99b250dd8a7a45f74581572f94f841a6177e906e19185ae3ac680ddc9f8"
+    },
+    {
+      "record_id": "1cc3277f-3cb7-4b75-944a-6535cf2533e1",
+      "recorded_at": "2026-10-29T17:35:42.154274+00:00",
+      "run_id": 31,
+      "issue": 39,
+      "stage": "plan",
+      "outcome": "turns_exhausted",
+      "harness": "claude-code",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 422204,
+      "exit_code": 1,
+      "usage": {
+        "cache_read_tokens": 107136,
+        "cache_write_tokens": 0,
+        "input_tokens": 21865,
+        "output_tokens": 13186,
+        "reported_cost_usd": 0.49254299999999995
+      },
+      "prompt_sha256": "4734cfe08e55bb9639608741af6155056c8610682a256162876093109ef44e80",
+      "context_sha256": {
+        "issue": "8167142cc5c95d263fa6bff708449bf66c1ac3a7dec61341a5f8b5c167930a35"
+      },
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "record_id": "addc038a-4812-4201-999e-4871e40639f9",
+      "recorded_at": "2026-10-29T17:37:25.228405+00:00",
+      "run_id": 32,
+      "issue": 62,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "claude"
+    },
+    {
+      "record_id": "e9d454de-bb40-4686-8cb4-fd38003af90d",
+      "recorded_at": "2026-10-29T17:37:25.228405+00:00",
+      "run_id": 32,
+      "issue": 62,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "codex"
+    },
+    {
+      "record_id": "01c6ba2f-eaaf-4550-a693-2bee4c868864",
+      "recorded_at": "2026-10-29T17:37:25.228405+00:00",
+      "run_id": 32,
+      "issue": 62,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "nvidia"
+    },
+    {
+      "record_id": "496844f8-379c-43f5-85ae-ba28eee562a8",
+      "recorded_at": "2026-10-29T17:37:31.053746+00:00",
+      "run_id": 32,
+      "issue": 62,
+      "stage": "triage",
+      "outcome": "proceed",
+      "harness": "chat-api",
+      "provider": "triage",
+      "model": "mimo-v2.6-flash",
+      "usage": null,
+      "prompt_sha256": "10b86071ce7b87cdc6654c7a6499581de3192fa1bb57d5531455ae1f56a94fab",
+      "output_sha256": "5b2dea60bb8d11fd1b28d5a772fadf0f4e1313b84e5b3466ea2864a5925dc07d"
+    },
+    {
+      "record_id": "fd00b4c4-d1fc-4b93-b8a2-fbd4d7cdf18b",
+      "recorded_at": "2026-10-29T17:57:32.715408+00:00",
+      "run_id": 32,
+      "issue": 62,
+      "stage": "plan",
+      "outcome": "timed_out",
+      "harness": "claude-code",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 1200158,
+      "exit_code": 124,
+      "usage": null,
+      "prompt_sha256": "a022abf57437a7ae5934c88d2d3d327325550eb96dff2655ac50a89b8cadf0e6",
+      "context_sha256": {
+        "issue": "8c2e6e12332305b5011de31d68b79692cd72a6986d0955b877d4ad083e2389fb"
+      },
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "record_id": "5207ade4-3070-4e16-a803-d6fb06f61dcf",
+      "recorded_at": "2026-10-29T18:00:08.439684+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "claude"
+    },
+    {
+      "record_id": "3885b1f7-c9c0-4655-b494-860d25a396b2",
+      "recorded_at": "2026-10-29T18:00:08.440706+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "codex"
+    },
+    {
+      "record_id": "1fe20e9e-e797-4f70-9280-112c3ac23773",
+      "recorded_at": "2026-10-29T18:00:08.441678+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "route",
+      "outcome": "skipped",
+      "provider": "nvidia"
+    },
+    {
+      "record_id": "060da672-e61a-4371-bedf-fdf4faf63605",
+      "recorded_at": "2026-10-29T18:00:23.236186+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "triage",
+      "outcome": "proceed",
+      "harness": "chat-api",
+      "provider": "triage",
+      "model": "mimo-v2.6-flash",
+      "usage": null,
+      "prompt_sha256": "ae8e59fdac7c700e163a220596a6fd8b7591c1057bbb3009f61db031695aeedb",
+      "output_sha256": "079c87c24dd2440f7d54103bd933409daa4eef0423ef2be3040c97f70340d075"
+    },
+    {
+      "record_id": "a4f71c49-89c4-4caf-90a5-32ea5a687378",
+      "recorded_at": "2026-10-29T18:16:36.476656+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "plan",
+      "outcome": "ok",
+      "harness": "opencode",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 971693,
+      "exit_code": 0,
+      "usage": {
+        "input_tokens": 54840,
+        "output_tokens": 2558,
+        "reasoning_tokens": 34640
+      },
+      "prompt_sha256": "47d749589fb6b6c9551863732487109b5544d1d378ab2c9d556ed8382398ec27",
+      "context_sha256": {
+        "issue": "c625aba88d2f618292c56c39644c8f1f7a067b7c66e2ed3c6f0287e1a5cd4b8d"
+      },
+      "output_sha256": "ac5e64ef414368db7ef2a99dec5b7774f9abf5010bd81fa1854ae8b54487abd4"
+    },
+    {
+      "record_id": "63a82907-637a-4ad1-809b-3120945d64b9",
+      "recorded_at": "2026-10-29T18:28:09.748679+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "implement",
+      "outcome": "ok",
+      "harness": "opencode",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 692846,
+      "exit_code": 0,
+      "usage": {
+        "input_tokens": 58350,
+        "output_tokens": 5204,
+        "reasoning_tokens": 21636
+      },
+      "prompt_sha256": "aa96e1a27270bee0fa96aec2d7563e91857f27d6671b113fac58566f897af36a",
+      "context_sha256": {
+        "plan": "ac5e64ef414368db7ef2a99dec5b7774f9abf5010bd81fa1854ae8b54487abd4"
+      },
+      "output_sha256": "0e7f40ae4a57401fc9c3818d36a57e8aadab15fd286fe8089b5b004e53422911"
+    },
+    {
+      "record_id": "26860f46-006c-484d-b63e-375019eec6a2",
+      "recorded_at": "2026-10-29T18:28:11.700710+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "gate",
+      "outcome": "passed",
+      "provider": "controller",
+      "context_sha256": {
+        "diff": "4576499236dbd5c708be584688e69527bc306fe05bdbcc31a42ac88030ca4422"
+      }
+    },
+    {
+      "record_id": "5a10b3e4-2cdc-4679-8d34-4af78343a366",
+      "recorded_at": "2026-10-29T18:45:59.929195+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "review",
+      "outcome": "rejected",
+      "harness": "opencode",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 1067105,
+      "exit_code": 0,
+      "usage": {
+        "input_tokens": 71106,
+        "output_tokens": 2320,
+        "reasoning_tokens": 39949
+      },
+      "prompt_sha256": "f4fa9d196da551a884b408cb81d6be1c1d38c85618c533fc74f593fc253666c6",
+      "context_sha256": {
+        "diff": "4576499236dbd5c708be584688e69527bc306fe05bdbcc31a42ac88030ca4422",
+        "issue": "c625aba88d2f618292c56c39644c8f1f7a067b7c66e2ed3c6f0287e1a5cd4b8d",
+        "plan": "ac5e64ef414368db7ef2a99dec5b7774f9abf5010bd81fa1854ae8b54487abd4"
+      },
+      "output_sha256": "10eed68955b7f7d0ef3cbaed88fc6961c3214989e548168903a8043d5d680b79"
+    },
+    {
+      "record_id": "129b4c1e-4427-424b-8952-f6563f15d758",
+      "recorded_at": "2026-10-29T18:56:03.450880+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "repair",
+      "outcome": "ok",
+      "harness": "opencode",
+      "provider": "mimo",
+      "model": "mimo-v2.6-flash",
+      "duration_ms": 599118,
+      "exit_code": 0,
+      "usage": {
+        "input_tokens": 38889,
+        "output_tokens": 2088,
+        "reasoning_tokens": 16734
+      },
+      "prompt_sha256": "a56c7f2d97fb7d11b735df26dc19d806993965f2a050fa10a484b5f19eeb2d2e",
+      "context_sha256": {
+        "plan": "ac5e64ef414368db7ef2a99dec5b7774f9abf5010bd81fa1854ae8b54487abd4"
+      },
+      "output_sha256": "15e2bf0a03741e3cfec511f724e6c4d037d8444dc8de8aec5feed6ec097c1300"
+    },
+    {
+      "record_id": "4f759f00-4014-4823-8be9-3ee5e3df821b",
+      "recorded_at": "2026-10-29T18:56:07.683662+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "gate",
+      "outcome": "passed",
+      "provider": "controller",
+      "context_sha256": {
+        "diff": "15f38f4650f57e6df81b69979ba6271146e39ebdaf00d7ac7d8e874962dd5aec"
+      }
+    },
+    {
+      "record_id": "ae9856c1-10c5-420b-9a7e-0178060cd7e2",
+      "recorded_at": "2026-10-29T19:00:04.227844+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "error",
+      "outcome": "cycle_timeout",
+      "harness": "cycle-supervisor",
+      "provider": "controller"
+    },
+    {
+      "record_id": "b82aaae9-208d-48fa-bdcb-2f6a53e962f0",
+      "recorded_at": "2026-10-29T19:07:29.228686+00:00",
+      "run_id": 33,
+      "issue": 63,
+      "stage": "review",
+      "outcome": "rejected",
+      "harness": "codex-desktop-evaluation",
+      "provider": "codex",
+      "context_sha256": {
+        "acceptance": "0f7c911154dd3fd8a9afa8445c678ceab429118a41e82d91aa85b973e85ac669",
+        "initial_diff": "4576499236dbd5c708be584688e69527bc306fe05bdbcc31a42ac88030ca4422",
+        "native_five_prompt": "df79d0cd1c2a8c21faa8b1a9397059dffab00f76704f2624678048d0472ce7da",
+        "native_five_state": "6602bbb5e8b742f4da72e1419ddb609db8fa1089064000a0eba4e7fb8a80e2ec",
+        "native_four_prompt": "f4fa9d196da551a884b408cb81d6be1c1d38c85618c533fc74f593fc253666c6",
+        "native_four_state": "57247e6ee50a7d506043f77d835c594ee284f18f500f3008421bcd7635f52b36",
+        "native_one_prompt": "47d749589fb6b6c9551863732487109b5544d1d378ab2c9d556ed8382398ec27",
+        "native_one_state": "a62da52410fc0eb6670dcdb74e96ce637a026118de445ddf03460e68e2eb127c",
+        "native_three_prompt": "aa96e1a27270bee0fa96aec2d7563e91857f27d6671b113fac58566f897af36a",
+        "native_three_state": "bc89e1137e160f0437d539cf9987f4afc558ebf13a3cbdf6e072536bf78fbf39",
+        "native_two_prompt": "a56c7f2d97fb7d11b735df26dc19d806993965f2a050fa10a484b5f19eeb2d2e",
+        "native_two_state": "4c450f253919b5f1a1028abf4406cb81ab54bf551369cadec8ffa55269b51b78",
+        "protocol": "6d838c52c55f2f38a5e21aad461ab72efa28cf345ceb87f81300491f9795815a",
+        "revised_diff": "15f38f4650f57e6df81b69979ba6271146e39ebdaf00d7ac7d8e874962dd5aec"
+      },
+      "output_sha256": "14d71a09243a94f70254f938f1268ef5b72479892bb41ab2e76e3f1d880f5ebd"
+    }
+  ],
+  "external_review_record_id": "b82aaae9-208d-48fa-bdcb-2f6a53e962f0",
+  "retained_native_state_hashes": [
+    {
+      "ordinal": "one",
+      "read_only": true,
+      "prompt_sha256": "47d749589fb6b6c9551863732487109b5544d1d378ab2c9d556ed8382398ec27",
+      "native_state_sha256": "a62da52410fc0eb6670dcdb74e96ce637a026118de445ddf03460e68e2eb127c",
+      "state_hash_format": "JSON message/part id+decoded-data rows, ordered by id; sorted keys; compact separators; UTF-8"
+    },
+    {
+      "ordinal": "two",
+      "read_only": false,
+      "prompt_sha256": "a56c7f2d97fb7d11b735df26dc19d806993965f2a050fa10a484b5f19eeb2d2e",
+      "native_state_sha256": "4c450f253919b5f1a1028abf4406cb81ab54bf551369cadec8ffa55269b51b78",
+      "state_hash_format": "JSON message/part id+decoded-data rows, ordered by id; sorted keys; compact separators; UTF-8"
+    },
+    {
+      "ordinal": "three",
+      "read_only": false,
+      "prompt_sha256": "aa96e1a27270bee0fa96aec2d7563e91857f27d6671b113fac58566f897af36a",
+      "native_state_sha256": "bc89e1137e160f0437d539cf9987f4afc558ebf13a3cbdf6e072536bf78fbf39",
+      "state_hash_format": "JSON message/part id+decoded-data rows, ordered by id; sorted keys; compact separators; UTF-8"
+    },
+    {
+      "ordinal": "four",
+      "read_only": true,
+      "prompt_sha256": "f4fa9d196da551a884b408cb81d6be1c1d38c85618c533fc74f593fc253666c6",
+      "native_state_sha256": "57247e6ee50a7d506043f77d835c594ee284f18f500f3008421bcd7635f52b36",
+      "state_hash_format": "JSON message/part id+decoded-data rows, ordered by id; sorted keys; compact separators; UTF-8"
+    },
+    {
+      "ordinal": "five",
+      "read_only": true,
+      "prompt_sha256": "df79d0cd1c2a8c21faa8b1a9397059dffab00f76704f2624678048d0472ce7da",
+      "native_state_sha256": "6602bbb5e8b742f4da72e1419ddb609db8fa1089064000a0eba4e7fb8a80e2ec",
+      "state_hash_format": "JSON message/part id+decoded-data rows, ordered by id; sorted keys; compact separators; UTF-8"
+    }
+  ],
+  "privacy": "No raw live reasoning, tool payloads, credentials or native-state database content published. Signatures attest ingestion of controller-reported records, not independent local execution.",
+  "evaluator_candidate_edits": false,
+  "application_prs_merged": false,
+  "supplemental_protocol_checks_blinded": false,
+  "new_paid_capacity": false,
+  "future_local_cycle_timeout_seconds": 7200,
+  "per_call_timeout_seconds": 1200,
+  "automatic_retries_added": false,
+  "source_default_backend_changed": false
+}

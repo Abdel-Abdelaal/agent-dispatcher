@@ -1,5 +1,10 @@
 # Review a native worker run
 
+Inspection includes profiles from planning/coding clones and each review's clean
+publication clone. Earlier inspection matched only agent-clone profiles, hiding
+retained reviewer activity. The counters still exclude raw prompts, reasoning,
+file paths and tool payloads.
+
 In `mimo`, ask: “Inspect run28 for shortlink, explain what failed, then check
 any resulting PR and its latest CI.” The native `trifecta_inspect_run` tool
 checks that the repository is owned and public before reading the corresponding

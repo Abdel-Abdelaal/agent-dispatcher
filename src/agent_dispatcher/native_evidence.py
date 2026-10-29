@@ -174,7 +174,8 @@ def report(root: Path, run_id: int) -> dict[str, Any]:
         "calls": calls,
         "native_evidence": [
             inspect(path)
-            for path in sorted((root / "checkpoints").glob(f"run-{run_id}-agent-*"))
+            for pattern in (f"run-{run_id}-agent-*", f"run-{run_id}-publish-*-*")
+            for path in sorted((root / "checkpoints").glob(pattern))
             if path.is_dir()
         ],
         "scope": "Local diagnostic metrics; raw private payloads are excluded.",

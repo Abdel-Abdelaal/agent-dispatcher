@@ -1,0 +1,25 @@
+[
+  {
+    "mode": "disabled",
+    "exit_code": 0,
+    "requests": 2,
+    "first_thinking": null,
+    "reasoning_roundtripped": true,
+    "tool_result_returned": true,
+    "success": true,
+    "error": null
+  },
+  {
+    "mode": "enabled",
+    "exit_code": 0,
+    "requests": 2,
+    "first_thinking": {
+      "type": "adaptive",
+      "display": "omitted"
+    },
+    "reasoning_roundtripped": true,
+    "tool_result_returned": true,
+    "success": true,
+    "error": null
+  }
+]
