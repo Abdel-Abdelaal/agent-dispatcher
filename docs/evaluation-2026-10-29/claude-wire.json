@@ -1,0 +1,31 @@
+[
+  {
+    "mode": "enabled",
+    "exit_code": 0,
+    "requests": 1,
+    "thinking": [
+      {
+        "type": "adaptive",
+        "display": "omitted"
+      }
+    ],
+    "max_tokens": [
+      32000
+    ],
+    "success": true,
+    "error": null
+  },
+  {
+    "mode": "disabled",
+    "exit_code": 0,
+    "requests": 1,
+    "thinking": [
+      null
+    ],
+    "max_tokens": [
+      32000
+    ],
+    "success": true,
+    "error": null
+  }
+]

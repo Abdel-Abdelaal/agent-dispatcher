@@ -1,5 +1,13 @@
 # MiMo harness comparison
 
+`DISPATCHER_MIMO_REASONING` controls the native OpenCode adapter. The legacy
+Claude Code gateway retains `MAX_THINKING_TOKENS=0` for compatibility; on a
+third-party endpoint the client can omit `thinking` rather than send `disabled`.
+MiMo documents thinking as enabled by default, so this is not evidence that the
+server stopped reasoning. Do not infer an effective legacy reasoning mode from
+the native setting. See the [29 October evaluation](quality-results-2026-10-29.md)
+for synthetic wire checks and the limits of that comparison.
+
 The default remains `claude-code`. An explicit opt-in setting,
 `DISPATCHER_MIMO_HARNESS=opencode`, selects an alternative adapter for the same
 MiMo model. `DISPATCHER_OPENCODE_EXECUTABLE` selects the reviewed executable.

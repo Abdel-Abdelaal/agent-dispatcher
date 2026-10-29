@@ -135,3 +135,28 @@ def test_cli_evidence_checks_repo_before_reading_and_handles_missing_run(
     assert data["run_id"] == run_id
     assert data["outcome"] == "failed"
     assert data["issue"] == 5
+
+
+def test_report_includes_review_attempts_without_neighbour_runs_or_payloads(
+    tmp_path: Path,
+) -> None:
+    for name, read_only in [
+        ("run-1-agent", True),
+        ("run-1-agent", False),
+        ("run-1-publish-1", True),
+        ("run-1-publish-2", True),
+        ("run-10-publish-1", True),
+    ]:
+        profile = native_evidence.create(
+            tmp_path / "checkpoints",
+            tmp_path / name,
+            "confidential-payload",
+            read_only=read_only,
+            reasoning="enabled",
+        )
+        native_db(profile)
+    result = native_evidence.report(tmp_path, 1)
+    assert len(result["native_evidence"]) == 4
+    assert all(r["native_state"] == "readable" for r in result["native_evidence"])
+    assert "confidential-payload" not in json.dumps(result)
+    assert str(tmp_path) not in json.dumps(result)

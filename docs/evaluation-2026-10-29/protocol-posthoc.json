@@ -1,0 +1,10 @@
+{
+  "sha256": "6d838c52c55f2f38a5e21aad461ab72efa28cf345ceb87f81300491f9795815a",
+  "python_source": "\"\"\"Post-inspection protocol checks, separate from the original frozen six.\"\"\"\nimport pytest\nfrom fastapi.testclient import TestClient\nfrom test_acceptance import app_client as app_client\n\n@pytest.mark.parametrize('path',['/health','/missing_1','/abc'])\ndef test_head_content_length_matches_get_or_is_omitted(app_client: TestClient,path: str):\n    get=app_client.get(path,follow_redirects=False)\n    head=app_client.head(path,follow_redirects=False)\n    assert head.status_code==get.status_code\n    assert head.content==b''\n    size=head.headers.get('content-length')\n    assert size is None or int(size)==len(get.content)\n\n@pytest.mark.parametrize('target',['https://example.com/a|b?q={x}','https://example.com/a^b'])\ndef test_head_and_get_use_identical_redirect_encoding(app_client: TestClient,target: str):\n    created=app_client.post('/links',json={'target_url':target,'code':'encode_1'})\n    assert created.status_code==201\n    head=app_client.head('/encode_1',follow_redirects=False)\n    get=app_client.get('/encode_1',follow_redirects=False)\n    assert head.status_code==get.status_code==307\n    assert head.headers['location']==get.headers['location']\r\n",
+  "method": "Written after initial candidate inspection. Supplemental protocol regression checks, NOT part of the original pre-task frozen six. Uses fixtures from original acceptance source.",
+  "specification": "https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6",
+  "initial_result": {
+    "passed": 0,
+    "failed": 5
+  }
+}

@@ -294,8 +294,8 @@ class Gateway:
         return {
             "ANTHROPIC_BASE_URL": self.base_url,
             "ANTHROPIC_AUTH_TOKEN": self.api_key.get_secret_value(),
-            # Without these Claude Code waits on extended thinking and background
-            # calls the gateway doesn't serve.
+            # Compatibility default: on third-party endpoints zero can omit the
+            # thinking parameter. It does not prove server-side reasoning is off.
             "MAX_THINKING_TOKENS": "0",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             **dict.fromkeys(_MODEL_VARIABLES, self.model),
