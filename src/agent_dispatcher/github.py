@@ -7,7 +7,7 @@ from typing import Any, cast
 import httpx
 
 from agent_dispatcher.intake import Issue
-from agent_dispatcher.states import State
+from agent_dispatcher.states import State, matches_state
 
 API = "https://api.github.com"
 _AGENT_BRANCH = re.compile(r"^agent/(?P<issue>\d+)-run-\d+$")
@@ -109,14 +109,13 @@ class GitHubReader:
         ):
             return False
         current = self.issue(original.repo, original.number)
-        states = {label for label in current.labels if label.startswith("agent:")}
         return (
             original.is_open
             and current.is_open
             and current.title == original.title
             and current.body == original.body
             and current.labelled_by == owner
-            and states == {expected.value}
+            and matches_state(current.labels, expected)
         )
 
     def owned_public_repos(self, owner: str) -> list[str]:

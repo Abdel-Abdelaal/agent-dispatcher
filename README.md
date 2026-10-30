@@ -219,7 +219,8 @@ flowchart LR
 Before work, branch publication, draft creation and CI-repair publication, the
 controller rechecks that the repository is public, owned by the configured owner,
 active, and that the task is open, unchanged since this run began, and in the expected
-authorized state.
+authorized operational state. Proposal annotations do not grant authority or
+conflict with that state. Multiple operational states are refused.
 Missing verification or a failed lookup refuses the operation. After detecting
 revocation it does not post cleanup comments or change labels. GitHub reads and
 writes are separate requests; these checks do not provide an atomic transaction

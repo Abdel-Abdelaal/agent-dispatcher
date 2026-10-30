@@ -1,4 +1,4 @@
-"""The label state machine: each task carries exactly one `agent:*` label."""
+"""The label state machine: each task carries one operational state label."""
 
 from collections.abc import Iterable
 from enum import StrEnum
@@ -48,3 +48,11 @@ def state_of(labels: Iterable[str]) -> State | None:
         message = f"more than one agent label: {', '.join(found)}"
         raise AmbiguousStateError(message)
     return State(found[0]) if found else None
+
+
+def matches_state(labels: Iterable[str], expected: State) -> bool:
+    """Match one operational state while allowing non-state proposal annotations."""
+    try:
+        return state_of(labels) is expected
+    except AmbiguousStateError:
+        return False

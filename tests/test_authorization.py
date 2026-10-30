@@ -46,6 +46,7 @@ def test_closed_task_is_not_accepted_after_queue_discovery():
     "change",
     [
         "unchanged",
+        "proposal_annotation",
         "closed",
         "title",
         "body",
@@ -80,7 +81,9 @@ def test_authority_binds_fresh_scope_and_task(change: str):
         "state": "open",
         "labels": [{"name": "agent:running"}],
     }
-    if change == "closed":
+    if change == "proposal_annotation":
+        issue["labels"] = [{"name": "agent:running"}, {"name": "agent:proposed"}]
+    elif change == "closed":
         issue["state"] = "closed"
     elif change == "missing_state":
         del issue["state"]
@@ -119,7 +122,7 @@ def test_authority_binds_fresh_scope_and_task(change: str):
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         assert GitHubReader(client).authorized_task(
             original, "owner", State.RUNNING
-        ) is (change == "unchanged")
+        ) is (change in {"unchanged", "proposal_annotation"})
 
 
 def test_production_run_wires_authority_reader(
@@ -161,7 +164,7 @@ def test_ambiguous_agent_labels_are_rejected_at_intake():
         7,
         "Task",
         "Original",
-        ("agent:ready", "agent:proposed"),
+        ("agent:ready", "agent:failed"),
         "owner",
         is_open=True,
     )
@@ -192,3 +195,16 @@ def test_latest_ready_actor_is_read_beyond_first_event_page(latest_actor: str | 
 
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         assert GitHubReader(client).labelled_by("owner/repo", 7) == latest_actor
+
+
+def test_owner_authorized_audit_proposal_annotation_does_not_block_intake():
+    issue = Issue(
+        "owner/repo",
+        7,
+        "Task",
+        "Original",
+        ("agent:ready", "agent:proposed"),
+        "owner",
+        is_open=True,
+    )
+    assert accepts(issue, "owner")

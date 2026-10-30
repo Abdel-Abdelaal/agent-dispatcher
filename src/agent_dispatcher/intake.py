@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from agent_dispatcher.states import State
+from agent_dispatcher.states import State, matches_state
 
 # Zero-width characters and bidi controls can hide instructions from a human reader.
 # Built from code points so the source itself contains no invisible characters.
@@ -71,7 +71,6 @@ def accepts(issue: Issue, owner: str) -> bool:
     """
     return (
         issue.is_open
-        and {label for label in issue.labels if label.startswith("agent:")}
-        == {State.READY.value}
+        and matches_state(issue.labels, State.READY)
         and issue.labelled_by == owner
     )
