@@ -14,6 +14,7 @@ _TOOLS = {"read", "glob", "grep", "list", "edit", "write", "apply_patch", "batch
 _STATES = {"pending", "running", "completed", "error"}
 _CATEGORIES = {
     "stage": {
+        "authorization",
         "route",
         "triage",
         "plan",

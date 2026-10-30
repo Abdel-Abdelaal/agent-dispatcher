@@ -41,8 +41,8 @@ def test_worker_fallback_respects_every_provider_quota() -> None:
 
 def test_cycle_queues_only_owner_labelled_issues(tmp_path: Path) -> None:
     issues = [
-        Issue("o/r", 1, "mine", "", ("agent:ready",), "owner"),
-        Issue("o/r", 2, "theirs", "", ("agent:ready",), "stranger"),
+        Issue("o/r", 1, "mine", "", ("agent:ready",), "owner", is_open=True),
+        Issue("o/r", 2, "theirs", "", ("agent:ready",), "stranger", is_open=True),
     ]
     queue = RunQueue(tmp_path / "q.sqlite3")
     cycle = Cycle("owner", ["o/r"], lambda _repo: issues, queue, 0.6)
@@ -60,6 +60,7 @@ def github_client() -> httpx.Client:
     issues: list[dict[str, object]] = [
         {
             "number": 7,
+            "state": "open",
             "title": "Add test",
             "body": None,
             "labels": [{"name": "agent:ready"}],
@@ -109,10 +110,10 @@ def test_cli_dry_run_prints_the_plan(
 
 
 def test_describe_parked_and_empty() -> None:
-    issue = Issue("o/r", 3, "t", "", ("agent:ready",), "stranger")
+    issue = Issue("o/r", 3, "t", "", ("agent:ready",), "stranger", is_open=True)
     plan = Plan([], [issue], None, None)
     assert cli.describe(plan, dry_run=True).splitlines() == [
-        "ignored (ready label not added by the owner): o/r#3",
+        "ignored (task lacks one open, owner-authorized ready state): o/r#3",
         "next: nothing queued",
     ]
     parked = Plan([], [], Task("o/r", 4, "t"), None)
@@ -170,8 +171,12 @@ def test_cli_repairs_when_no_task_is_waiting(
 
 def test_status_shows_waiting_parked_and_recent_runs(tmp_path: Path) -> None:
     queue = RunQueue(tmp_path / "q.sqlite3")
-    queue.enqueue(Issue("o/r", 1, "first", "", ("agent:ready",), "owner"), NOW)
-    queue.enqueue(Issue("o/r", 2, "second", "", ("agent:ready",), "owner"), NOW)
+    queue.enqueue(
+        Issue("o/r", 1, "first", "", ("agent:ready",), "owner", is_open=True), NOW
+    )
+    queue.enqueue(
+        Issue("o/r", 2, "second", "", ("agent:ready",), "owner", is_open=True), NOW
+    )
     run = queue.start_run(Task("o/r", 2, "second"), "claude+mimo", NOW)
     queue.finish_run(run, "review", NOW)
     queue.park("codex", datetime(2026, 10, 26, tzinfo=UTC))

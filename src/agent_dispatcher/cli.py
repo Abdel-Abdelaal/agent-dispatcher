@@ -86,7 +86,8 @@ def describe(plan: Plan, *, dry_run: bool) -> str:
     """Return a short, human-readable account of a cycle."""
     lines = [f"queued: {issue.repo}#{issue.number}" for issue in plan.queued]
     lines += [
-        f"ignored (ready label not added by the owner): {issue.repo}#{issue.number}"
+        "ignored (task lacks one open, owner-authorized ready state): "
+        f"{issue.repo}#{issue.number}"
         for issue in plan.ignored
     ]
     if plan.next_task is None:
@@ -242,6 +243,10 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         skip_easy_docs_plan=settings.skip_plan_for_easy_docs,
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
+        authorize=lambda original, expected: GitHubReader(
+            client,
+            settings.github_token.get_secret_value() if settings.github_token else None,
+        ).authorized_task(original, settings.owner, expected),
     )
 
 

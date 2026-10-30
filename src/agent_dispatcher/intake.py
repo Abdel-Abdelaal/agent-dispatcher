@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from agent_dispatcher.states import State
+from agent_dispatcher.states import State, matches_state
 
 # Zero-width characters and bidi controls can hide instructions from a human reader.
 # Built from code points so the source itself contains no invisible characters.
@@ -41,6 +41,7 @@ class Issue:
     body: str
     labels: tuple[str, ...]
     labelled_by: str | None
+    is_open: bool
 
 
 def sanitise(text: str) -> str:
@@ -68,4 +69,8 @@ def accepts(issue: Issue, owner: str) -> bool:
     Anyone with triage access can label an issue, and anyone can write its body,
     so authorship is not enough: the ready label itself must come from the owner.
     """
-    return State.READY.value in issue.labels and issue.labelled_by == owner
+    return (
+        issue.is_open
+        and matches_state(issue.labels, State.READY)
+        and issue.labelled_by == owner
+    )

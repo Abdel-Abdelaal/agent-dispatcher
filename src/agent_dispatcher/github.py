@@ -2,17 +2,18 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 from agent_dispatcher.intake import Issue
-from agent_dispatcher.states import State
+from agent_dispatcher.states import State, matches_state
 
 API = "https://api.github.com"
 _AGENT_BRANCH = re.compile(r"^agent/(?P<issue>\d+)-run-\d+$")
 # Advisory checks never block a merge, so they never trigger a repair either.
 _ADVISORY = ("review / ai",)
+_EVENTS_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class GitHubReader:
                 body=row.get("body") or "",
                 labels=tuple(label["name"] for label in row["labels"]),
                 labelled_by=self.labelled_by(repo, row["number"]),
+                is_open=row.get("state") == "open",
             )
             for row in rows
             if "pull_request" not in row
@@ -87,6 +89,33 @@ class GitHubReader:
             body=row.get("body") or "",
             labels=tuple(label["name"] for label in row["labels"]),
             labelled_by=self.labelled_by(repo, number),
+            is_open=row.get("state") == "open",
+        )
+
+    def authorized_task(self, original: Issue, owner: str, expected: State) -> bool:
+        """Recheck public scope, raw task content and the owner's current authority."""
+        response = self._client.get(
+            f"{API}/repos/{original.repo}", headers=self._headers, timeout=30
+        )
+        response.raise_for_status()
+        repo = response.json()
+        if not (
+            repo.get("private") is False
+            and repo.get("archived") is False
+            and repo.get("disabled") is False
+            and repo.get("visibility") == "public"
+            and str(repo.get("full_name", "")).lower() == original.repo.lower()
+            and str(repo.get("owner", {}).get("login", "")).lower() == owner.lower()
+        ):
+            return False
+        current = self.issue(original.repo, original.number)
+        return (
+            original.is_open
+            and current.is_open
+            and current.title == original.title
+            and current.body == original.body
+            and current.labelled_by == owner
+            and matches_state(current.labels, expected)
         )
 
     def owned_public_repos(self, owner: str) -> list[str]:
@@ -174,12 +203,25 @@ class GitHubReader:
 
     def labelled_by(self, repo: str, number: int) -> str | None:
         """Return who most recently added the ready label, from the issue events."""
-        events = self._get(f"/repos/{repo}/issues/{number}/events", {"per_page": 100})
-        actors = [
-            event["actor"]["login"]
-            for event in events
-            if event.get("event") == "labeled"
-            and event.get("label", {}).get("name") == State.READY.value
-            and event.get("actor")
-        ]
-        return actors[-1] if actors else None
+        page = 1
+        actor: str | None = None
+        while True:
+            events = self._get(
+                f"/repos/{repo}/issues/{number}/events",
+                {"per_page": _EVENTS_PAGE_SIZE, "page": page},
+            )
+            for event in events:
+                if (
+                    event.get("event") == "labeled"
+                    and event.get("label", {}).get("name") == State.READY.value
+                ):
+                    current_actor = event.get("actor")
+                    login = (
+                        cast("dict[str, object]", current_actor).get("login")
+                        if isinstance(current_actor, dict)
+                        else None
+                    )
+                    actor = login if isinstance(login, str) else None
+            if len(events) < _EVENTS_PAGE_SIZE:
+                return actor
+            page += 1

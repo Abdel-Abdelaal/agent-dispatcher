@@ -313,7 +313,7 @@ def test_failed_termination_does_not_release_active_lease(
 def test_failure_notice_preserves_review_and_uses_bounded_controller_writes(
     monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
-    issue = Issue("o/r", 1, "task", "", (state,), "owner")
+    issue = Issue("o/r", 1, "task", "", (state,), "owner", is_open=True)
     monkeypatch.setattr(
         cli, "GitHubReader", Mock(return_value=Mock(issue=Mock(return_value=issue)))
     )
