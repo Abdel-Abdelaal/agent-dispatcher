@@ -416,9 +416,12 @@ def test_codex_reports_the_last_turn_usage(tmp_path: Path) -> None:
 def test_opencode_usage_stays_unknown(tmp_path: Path) -> None:
     worktree = tmp_path / "w"
     worktree.mkdir()
+    runner = FakeRunner(0, "done")
     result = nvidia_worker(SecretStr("k")).run(
-        "x", worktree, runner=FakeRunner(0, "done"), environ=HOST_ENV
+        "x", worktree, runner=runner, environ=HOST_ENV
     )
+    argv = runner.calls[0][0]
+    assert argv[argv.index("--title") + 1] == "Agent task"
     assert (result.harness, result.model, result.usage) == (
         "opencode",
         "z-ai/glm-5.3-flash",
