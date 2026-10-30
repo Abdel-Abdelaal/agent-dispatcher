@@ -6,9 +6,10 @@ from pathlib import Path
 
 from pydantic import SecretStr
 
-from agent_dispatcher import cli
+from agent_dispatcher import cli, native_evidence
 from agent_dispatcher.opencode_worker import MiMoOpenCode, events
 from agent_dispatcher.settings import Settings
+from agent_dispatcher.telemetry import sha256
 
 
 def test_event_parser_keeps_final_reply_and_known_usage() -> None:
@@ -137,7 +138,16 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
         return 124, "", "timed out"
 
     worker = MiMoOpenCode(
-        SecretStr("must-not-persist"), checkpoint_root=tmp_path / "checkpoints"
+        SecretStr("must-not-persist"),
+        checkpoint_root=tmp_path / "checkpoints",
+        binding=native_evidence.CallBinding(
+            7,
+            "implement",
+            sha256("raw issue"),
+            "a" * 40,
+            sha256("initial patch"),
+            sha256("policy"),
+        ),
     )
     result = worker.run("private task", tmp_path, runner=runner, environ={})
     assert result.stop_reason == "timed_out"
@@ -150,4 +160,11 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
     metadata = (retained[0] / "metadata.json").read_text()
     assert "must-not-persist" not in metadata
     assert "private task" not in metadata
+    assert json.loads(metadata)["binding"]["run_id"] == 7
+    assert json.loads(metadata)["binding"]["task_sha256"] == sha256("raw issue")
+    assert json.loads(metadata)["binding"]["patch_sha256"] == sha256("initial patch")
+    assert (retained[0] / "config.sha256").read_text() == sha256(
+        worker.config(read_only=False, steps=15)
+    )
+    assert "raw issue" not in metadata
     assert not cache[0].exists()

@@ -69,9 +69,12 @@ def test_agent_cannot_replace_the_controller_diff_base(
     candidate: tuple[Workspace, Path],
 ) -> None:
     workspace, clone = candidate
+    original_base = workspace.base(clone)
     (clone / "sample.txt").write_text("changed\n", encoding="utf-8")
     git(clone, "add", ".")
     git(clone, "commit", "-m", "agent hides its change")
+    assert git(clone, "rev-parse", "HEAD").strip() != original_base
+    assert workspace.base(clone) == original_base
     patch = workspace.patch(clone)
     assert "+changed" in patch
     assert "-baseline" in patch
@@ -81,6 +84,8 @@ def test_unregistered_clone_is_rejected_before_git_runs(tmp_path: Path) -> None:
     workspace = Workspace(tmp_path, subprocess_runner, {})
     with pytest.raises(GitError, match="controller-owned"):
         workspace.patch(tmp_path)
+    with pytest.raises(GitError, match="controller-owned"):
+        workspace.base(tmp_path)
 
 
 def test_trusted_attributes_disable_a_configured_filter(

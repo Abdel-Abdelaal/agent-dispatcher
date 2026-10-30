@@ -46,6 +46,7 @@ def test_partial_native_state_returns_counters_without_confidential_payloads(
         read_only=True,
         reasoning="enabled",
     )
+    assert json.loads((profile / "metadata.json").read_text())["binding"] is None
     native_db(profile)
     native_evidence.finish(profile, 124, "confidential-payload")
     result = native_evidence.inspect(profile)

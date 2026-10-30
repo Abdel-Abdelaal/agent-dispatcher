@@ -66,6 +66,7 @@ class MiMoOpenCode:
     name: str = "mimo"
     reasoning: Literal["enabled", "disabled"] = "enabled"
     checkpoint_root: Path | None = None
+    binding: native_evidence.CallBinding | None = None
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -122,6 +123,7 @@ class MiMoOpenCode:
     ) -> RunResult:
         """Isolate ambient config; optionally retain private native diagnostic state."""
         del tuning
+        config = self.config(read_only=read_only, steps=max_turns or 15)
         with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
             root = Path(tmp)
             evidence = root
@@ -132,6 +134,11 @@ class MiMoOpenCode:
                     prompt,
                     read_only=read_only,
                     reasoning=self.reasoning,
+                    binding=self.binding,
+                )
+                (evidence / "config.sha256").write_text(
+                    native_evidence.sha256(config),
+                    encoding="utf-8",
                 )
             task = evidence / "task.md"
             task.write_text(prompt, encoding="utf-8")
@@ -142,9 +149,7 @@ class MiMoOpenCode:
             (root / "tmp").mkdir()
             env["TEMP"] = env["TMP"] = str(root / "tmp")
             env.update(
-                OPENCODE_CONFIG_CONTENT=self.config(
-                    read_only=read_only, steps=max_turns or 15
-                ),
+                OPENCODE_CONFIG_CONTENT=config,
                 OPENCODE_DISABLE_PROJECT_CONFIG="1",
                 OPENCODE_TEST_HOME=str(root / "home"),
                 OPENCODE_DISABLE_AUTOUPDATE="1",

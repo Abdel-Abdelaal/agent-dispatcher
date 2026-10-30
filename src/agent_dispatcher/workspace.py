@@ -93,6 +93,27 @@ class Workspace:
 
     def patch(self, clone: Path) -> str:
         """Return every change in the agent's clone as one binary-safe patch."""
+        prefix, env = self._trusted_context(clone)
+        self._git(self._root, *prefix, "add", "--all", environment=env)
+        return self._git(
+            self._root,
+            *prefix,
+            "diff",
+            "--cached",
+            "--binary",
+            "--no-ext-diff",
+            "--no-textconv",
+            environment=env,
+        )
+
+    def base(self, clone: Path) -> str:
+        """Read the original base from controller-owned metadata, never agent HEAD."""
+        prefix, env = self._trusted_context(clone)
+        return self._git(
+            self._root, *prefix, "rev-parse", "HEAD", environment=env
+        ).strip()
+
+    def _trusted_context(self, clone: Path) -> tuple[tuple[str, ...], dict[str, str]]:
         metadata = self._metadata.get(clone.resolve())
         if metadata is None:
             message = "No controller-owned Git metadata for this clone."
@@ -106,17 +127,7 @@ class Workspace:
             XDG_CONFIG_HOME=str(self._metadata_root / "empty-home"),
         )
         prefix = ("--git-dir", str(metadata), "--work-tree", str(clone.resolve()))
-        self._git(self._root, *prefix, "add", "--all", environment=env)
-        return self._git(
-            self._root,
-            *prefix,
-            "diff",
-            "--cached",
-            "--binary",
-            "--no-ext-diff",
-            "--no-textconv",
-            environment=env,
-        )
+        return prefix, env
 
     def apply(self, clone: Path, patch: str) -> tuple[list[FileChange], list[str]]:
         """Apply the patch to a clean clone; return its changes and any symlinks."""

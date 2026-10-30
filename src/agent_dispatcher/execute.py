@@ -9,7 +9,7 @@ the other thinker from the planner wherever both are available.
 import json
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -24,6 +24,8 @@ from agent_dispatcher.levels import (
     parse_level,
     split_rating,
 )
+from agent_dispatcher.native_evidence import CallBinding
+from agent_dispatcher.opencode_worker import MiMoOpenCode
 from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
@@ -297,6 +299,34 @@ class Run:
         step = self.ladder.get(name, {}).get(self.level.label)
         return Tuning(*step) if step else None
 
+    def _bound_provider(self, name: str, kind: str, clone: Path) -> Provider:
+        adapter = self.providers[name]
+        if not isinstance(adapter, MiMoOpenCode) or adapter.checkpoint_root is None:
+            return adapter
+        return replace(
+            adapter,
+            binding=CallBinding(
+                run_id=self.run_id,
+                stage=kind,
+                task_sha256=sha256(
+                    json.dumps(
+                        [
+                            self.issue.repo,
+                            self.issue.number,
+                            self.issue.title,
+                            self.issue.body,
+                        ],
+                        ensure_ascii=True,
+                    )
+                ),
+                base_commit=self.workspace.base(clone),
+                patch_sha256=sha256(self.workspace.patch(clone)),
+                policy_sha256=sha256(
+                    json.dumps([PROTECTED_PATTERNS, asdict(self.limits)])
+                ),
+            ),
+        )
+
     def _step(  # noqa: PLR0913 - the telemetry stage and context ride along
         self,
         name: str,
@@ -328,7 +358,8 @@ class Run:
             tuning = self._tuning(name) if read_only else None
             thinking, working = TURNS[self.level.label]
             started = datetime.now(UTC)
-            result = self.providers[name].run(
+            adapter = self._bound_provider(name, kind, clone)
+            result = adapter.run(
                 prompt,
                 clone,
                 read_only=read_only,
