@@ -237,6 +237,8 @@ It runs this open-source tool, unmodified, as a separate process:
 
 Why these and not others is in
 [ADR 0001](docs/decisions/0001-build-vs-adopt.md).
+The [30 October research review](docs/harness-research-2026-10-30.md) maps
+newer evidence to controlled experiments and records the limits of our claims.
 
 ## Contributing
 

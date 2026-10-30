@@ -48,6 +48,34 @@ transfer to MiMo or our repositories. Historical scores are not current rankings
 | [METR time horizons, v4](https://arxiv.org/abs/2503.14499v4), task-duration methodology | Human task duration and completion probability are different from time spent generating tokens | Measure meaningful completed work, uncertainty and intervention burden; do not force a task to last 15 minutes |
 | [Terminal-Bench 4.0](https://www.tbench.ai/news/terminal-bench-4-0), current benchmark methodology | Resource calibration reduces infrastructure noise; its timeout is eight hours | Calibrate time/CPU/memory headroom and report our constraints before comparing scores across harnesses |
 
+Further angles challenge some tempting shortcuts:
+
+- [TestSuiteBench](https://arxiv.org/html/2610.13065v1), an October 2026
+  preprint, evaluates specification-derived test suites against requirement
+  mutants. Valid passing tests can still miss intended behavior. Its mutants
+  sample requirements and need not match real fault distributions; use mutation
+  checks as another signal, not a complete correctness certificate.
+- [Rethinking agent-generated tests](https://arxiv.org/html/2602.07900v2)
+  finds that changing test-writing volume did not significantly improve issue
+  resolution in its controlled prompt interventions. Its light scaffold and
+  SWE-bench setting limit transfer. Measure useful fault detection and final
+  correctness rather than reward test counts or mandate redundant tests.
+- [Test-Time Harness Evolution, v2](https://arxiv.org/html/2607.08124v2),
+  revised October 2026, explores evolving executable harnesses from traces
+  without final-answer labels. It also identifies unreliable proxy selection:
+  an executable candidate can remain semantically wrong. Our experiment should
+  propose harness changes through isolated PRs, compare on development tasks,
+  then evaluate a sealed holdout before promotion. Authorization, protected
+  paths and publication gates stay outside the editable candidate. Automatic
+  self-modification is not implemented or justified by this paper alone.
+- Anthropic's [long-running harness report](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+  describes incremental work, durable progress artifacts and end-to-end
+  verification. Its [managed-agent architecture](https://www.anthropic.com/research/managed-agents)
+  separates the event log, harness and replaceable execution environment.
+  These are useful engineering precedents for crash recovery, not evidence we
+  have invented that architecture. We can study these boundaries without
+  purchasing its hosted service.
+
 These sources do not establish that more agents, more tokens or more retained
 text always improve quality. Compact-Bench limits its conclusions to its tested
 repairs, continuation agent and budgets. The compaction study acknowledges

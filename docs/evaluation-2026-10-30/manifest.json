@@ -8,7 +8,8 @@
     "interrupted-reasoning.json": "45e1a1c918eb077dcc7fc8777ca2a4c1b60f42d26ca5d1dd04fa34ea9a1d53ab",
     "output-budget-wire.json": "191215203f7ace52847e3eb8a69257c3fbb034d59b765964fa578ff45612d71e",
     "fixture-assumption-error.json": "f6e8ceefdcc76fe2ac9aa8b6b4e767510f36c9558719519239feee270574d44b",
-    "continuation-acceptance.json": "e2acdb4e84e1b86579e23978958730a3678271c3c3e135e880f4f29a4a1279f1"
+    "continuation-acceptance.json": "e2acdb4e84e1b86579e23978958730a3678271c3c3e135e880f4f29a4a1279f1",
+    "experiment-plan.json": "5ec6eee313061b630609ef0dd45f526a589b7f161e691cde88ad9ad59d759584"
   },
   "privacy": "No real prompts, private reasoning, real tool payloads, session databases or credentials published.",
   "limitations": "Original source scripts are retained locally with hashes in signed telemetry; these summaries are not an independently reproduced public benchmark. The first fixture assumption error is retained.",
