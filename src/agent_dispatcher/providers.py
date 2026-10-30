@@ -56,6 +56,7 @@ class RunResult:
     usage: dict[str, int | float] | None = None
     # Why a failed call stopped, when the harness says: "max_turns" or "timed_out".
     stop_reason: str = ""
+    retention_errors: tuple[str, ...] = ()
 
 
 class TermsError(RuntimeError):

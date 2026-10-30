@@ -26,6 +26,13 @@ class CallBinding:
 
 _TOOLS = {"read", "glob", "grep", "list", "edit", "write", "apply_patch", "batch"}
 _STATES = {"pending", "running", "completed", "error"}
+RETENTION_ERRORS = {
+    "native_storage_error",
+    "snapshot_git_error",
+    "snapshot_os_error",
+    "snapshot_callback_error",
+    "receipt_storage_error",
+}
 _CATEGORIES = {
     "stage": {
         "authorization",
@@ -63,6 +70,7 @@ _CATEGORIES = {
         "cycle_abandoned",
         "controller_cancelled",
         "controller_failed",
+        "candidate_unavailable",
     },
     "harness": {"opencode", "claude-code", "codex-cli", "chat-api", "cycle-supervisor"},
 }
@@ -78,6 +86,12 @@ def metrics(row: dict[str, Any]) -> dict[str, Any]:
     for key in ("duration_ms", "exit_code"):
         result[key] = row.get(key) if type(row.get(key)) is int else None
     raw = row.get("usage")
+    errors = row.get("retention_errors")
+    if isinstance(errors, list):
+        result["retention_errors"] = [
+            error if isinstance(error, str) and error in RETENTION_ERRORS else "other"
+            for error in cast("list[object]", errors)
+        ]
     usage = cast("dict[str, Any]", raw) if isinstance(raw, dict) else None
     result["usage"] = (
         {
@@ -133,6 +147,25 @@ def finish(profile: Path, code: int, output: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def finish_candidate(
+    profile: Path,
+    patch_sha256: str | None,
+    *,
+    errors: tuple[str, ...] = (),
+) -> None:
+    """Retain a separate final-state receipt without rewriting the native result."""
+    with (profile / "candidate.json").open("x", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "status": "captured" if patch_sha256 is not None else "unavailable",
+                "patch_sha256": patch_sha256,
+                "retention_errors": list(errors),
+            },
+            handle,
+        )
 
 
 def inspect(profile: Path) -> dict[str, Any]:

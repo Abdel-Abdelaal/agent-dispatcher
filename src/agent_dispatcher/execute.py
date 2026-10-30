@@ -85,6 +85,7 @@ REPAIR_CI_PLAN = "Fix the failing CI check shown in the log, and nothing else."
 MAX_REVIEWS = 2
 _TITLE_LIMIT = 72
 _STOP_REASONS = {
+    "candidate_unavailable": " (the final candidate evidence could not be retained)",
     "max_turns": " (it ran out of turns even at the hard level)",
     "timed_out": " (it hit the 20-minute limit for one call)",
 }
@@ -291,6 +292,7 @@ class Run:
             exhausted=result.exhausted,
             resets_at=result.resets_at.isoformat() if result.resets_at else None,
             usage=result.usage,
+            retention_errors=list(result.retention_errors),
             **self._output(result.text),
         )
 
@@ -305,6 +307,7 @@ class Run:
             return adapter
         return replace(
             adapter,
+            candidate_snapshot=lambda: sha256(self.workspace.patch(clone)),
             binding=CallBinding(
                 run_id=self.run_id,
                 stage=kind,

@@ -3,13 +3,17 @@
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from unittest.mock import Mock
 
+import pytest
 from pydantic import SecretStr
 
-from agent_dispatcher import cli, native_evidence
+from agent_dispatcher import cli, native_evidence, opencode_worker
 from agent_dispatcher.opencode_worker import MiMoOpenCode, events
+from agent_dispatcher.providers import RunResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
+from agent_dispatcher.workspace import GitError
 
 
 def test_event_parser_keeps_final_reply_and_known_usage() -> None:
@@ -168,3 +172,135 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
     )
     assert "raw issue" not in metadata
     assert not cache[0].exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 124, 429])
+@pytest.mark.parametrize(
+    "failure", ["callback", "callback_os", "unexpected", "receipt", "native"]
+)
+def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
+    tmp_path: Path,
+    exit_code: int,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def snapshot() -> str:
+        message = "private error details"
+        error = {
+            "callback": GitError,
+            "callback_os": OSError,
+            "unexpected": RuntimeError,
+        }.get(failure)
+        if error is not None:
+            raise error(message)
+        return sha256("candidate")
+
+    def storage_failure(*_args: object, **_kwargs: object) -> None:
+        message = "storage unavailable"
+        raise OSError(message)
+
+    if failure == "receipt":
+        monkeypatch.setattr(native_evidence, "finish_candidate", storage_failure)
+    if failure == "native":
+        monkeypatch.setattr(native_evidence, "finish", storage_failure)
+
+    def runner(
+        _argv: list[str],
+        _cwd: Path,
+        _stdin: str,
+        _env: Mapping[str, str],
+    ) -> tuple[int, str, str]:
+        output = json.dumps(
+            {
+                "type": "step_finish",
+                "part": {"tokens": {"input": 10, "output": 2, "reasoning": 4}},
+            }
+        )
+        return exit_code, output, "quota exhausted" if exit_code == 429 else ""
+
+    worker = MiMoOpenCode(
+        SecretStr("test-only"),
+        checkpoint_root=tmp_path / "checkpoints",
+        candidate_snapshot=snapshot,
+    )
+    result = worker.run("private task", tmp_path, runner=runner, environ={})
+    assert result.exit_code != 0
+    expected_error = {
+        "callback": "snapshot_git_error",
+        "callback_os": "snapshot_os_error",
+        "unexpected": "snapshot_callback_error",
+        "receipt": "receipt_storage_error",
+        "native": "native_storage_error",
+    }[failure]
+    assert result.retention_errors == (expected_error,)
+    assert result.exhausted is (exit_code == 429)
+    assert result.usage == {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "reasoning_tokens": 4,
+    }
+    assert result.stop_reason == (
+        "timed_out" if exit_code == 124 else "candidate_unavailable"
+    )
+    profile = next((tmp_path / "checkpoints").iterdir())
+    if failure == "receipt":
+        assert not (profile / "candidate.json").exists()
+    else:
+        receipt = json.loads((profile / "candidate.json").read_text())
+        assert receipt["status"] == (
+            "captured" if failure == "native" else "unavailable"
+        )
+        assert receipt["patch_sha256"] == (
+            sha256("candidate") if failure == "native" else None
+        )
+        assert "private error details" not in json.dumps(receipt)
+        assert receipt["retention_errors"] == [expected_error]
+    if failure == "native":
+        assert not (profile / "result.json").exists()
+    else:
+        assert (
+            json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
+        )
+
+
+def test_snapshot_without_retained_state_is_refused() -> None:
+    with pytest.raises(ValueError, match="retained checkpoint state"):
+        MiMoOpenCode(
+            SecretStr("test-only"), candidate_snapshot=lambda: sha256("candidate")
+        )
+
+
+def test_retention_failure_cannot_request_another_turn_escalation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opencode_worker,
+        "provider_result",
+        Mock(
+            return_value=RunResult(
+                "mimo", 0, "", exhausted=False, stop_reason="max_turns"
+            )
+        ),
+    )
+
+    def snapshot() -> str:
+        message = "snapshot unavailable"
+        raise GitError(message)
+
+    def runner(
+        _argv: list[str],
+        _cwd: Path,
+        _stdin: str,
+        _env: Mapping[str, str],
+    ) -> tuple[int, str, str]:
+        return 0, "", ""
+
+    worker = MiMoOpenCode(
+        SecretStr("test-only"),
+        checkpoint_root=tmp_path / "checkpoints",
+        candidate_snapshot=snapshot,
+    )
+    result = worker.run("task", tmp_path, runner=runner, environ={})
+    assert result.stop_reason == "candidate_unavailable"
+    assert result.exit_code == 1
