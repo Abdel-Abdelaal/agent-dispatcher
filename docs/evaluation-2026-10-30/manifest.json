@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-30",
+  "kind": "controller-reported local synthetic experiments; not a live-model benchmark",
+  "sha256": {
+    "conversation-fork.json": "60f90045b80ef17e82aec9d27a5922eaadf759fa7ae4874f1caf13333ed48ba4",
+    "completed-reasoning.json": "9f23798226c71563afe0de0219f83f5d52a00cb288c3f16a8e48aa0ee0be5dfd",
+    "interrupted-reasoning.json": "9a2049e2c8f292e376c4c2c5046a77fd16280aae8b59d999c3a662e521f85d8e",
+    "output-budget-wire.json": "3d93b794e0a83aba52f9356dfeac141e98bedaf3654ea27b2545b89f676f4e92",
+    "fixture-assumption-error.json": "933d213afb37db985f3ec2c7722b4550c811983a5cdb01c6f37ee99abe1df946",
+    "continuation-acceptance.json": "e2acdb4e84e1b86579e23978958730a3678271c3c3e135e880f4f29a4a1279f1"
+  },
+  "privacy": "No real prompts, private reasoning, real tool payloads, session databases or credentials published.",
+  "limitations": "Original source scripts are retained locally with hashes in signed telemetry; these summaries are not an independently reproduced public benchmark. The first fixture assumption error is retained.",
+  "budget_note": "The 32768 declaration case matches the platform analysis declaration. The native helper currently declares 32000; both are capped at 32000 without a global override."
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "assertion_failed",
+  "reason": "Incorrect assumption that a fork populates session.parent_id; both rows had parent_id null. History-carryover checks passed before this assertion. No provider or production failure inferred."
+}

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "frozen_on": "2026-10-30",
+  "status": "not run; frozen before new live budget or recovery implementation",
+  "goal": "Improve independently verified task completion and safe recovery; no universal quality or novelty claim.",
+  "controls": {
+    "model": "same exact model and endpoint within each comparison",
+    "inputs": "same frozen task, source, reference context, acceptance tests and tool policy",
+    "source": "independent approved snapshots; acceptance tests unavailable to worker",
+    "accounting": "all attempts retained; no best-only reporting, reset credits, paid capacity or silent gate changes"
+  },
+  "studies": [
+    {
+      "id": "output_and_deadline",
+      "design": "2x2 factorial",
+      "output_tokens": [
+        32000,
+        131072
+      ],
+      "deadline_seconds": [
+        600,
+        3600
+      ],
+      "requirements": [
+        "Verify actual client request shaping before live inference.",
+        "Verify dedicated Token Plan endpoint acceptance; no paid endpoint fallback.",
+        "Allocate whole-run and hosting headroom consistent with the per-call deadline.",
+        "Randomize order and report repetition count; expansion follows pilot validity."
+      ],
+      "primary_outcome": "Valid task result plus independent correctness acceptance; JSON validity alone is insufficient."
+    },
+    {
+      "id": "recovery_and_compaction",
+      "design": "paired continuations from the same source and candidate state",
+      "variants": [
+        "full history",
+        "summary only",
+        "verified checkpoint fork"
+      ],
+      "faults": [
+        "forced client termination during reasoning",
+        "ordinary provider completion limit",
+        "quota rejection",
+        "controlled host interruption"
+      ],
+      "requirements": [
+        "Original attempt immutable; source message/part hashes unchanged.",
+        "Closed/changed tasks and stale/unbound candidates rejected.",
+        "Provider parks, leases, cumulative usage and repair allowances preserved.",
+        "Report information retention and actual task completion separately."
+      ]
+    },
+    {
+      "id": "architecture",
+      "design": "same model, tasks and stated resource budgets",
+      "variants": [
+        "pinned reference OpenCode",
+        "simple repair plus verifier baseline",
+        "current planner worker reviewer",
+        "current roles with isolated verifier feedback"
+      ],
+      "requirements": [
+        "No privileged shell or host credentials in any baseline.",
+        "Declare differing tool/environment capabilities; do not attribute every gain to orchestration.",
+        "Judge original acceptance and maintainability independently of model claims."
+      ]
+    },
+    {
+      "id": "fleet_and_security",
+      "design": "cross-repository evolution plus safe adversarial fixtures",
+      "requirements": [
+        "Positive task utility and forbidden-effect rates both reported.",
+        "Cover authorization revocation, changed candidates, test weakening and Git metadata attacks.",
+        "Private raw payloads remain private; public evidence is scrubbed and bounded.",
+        "Do not compare our local subset to an unrelated public leaderboard score."
+      ]
+    }
+  ],
+  "metrics": [
+    "independent pass rate with numerator/denominator",
+    "native versus external test disagreement",
+    "recovery preservation, damage and rescue",
+    "unauthorized effects and legitimate tasks blocked",
+    "wall time and infrastructure failures",
+    "human or stronger-model intervention count",
+    "reported usage and missing usage separately",
+    "unrelated changes, duplication and architecture regressions"
+  ],
+  "claim_gate": [
+    "current source-backed prior-art comparison",
+    "reproducible methods and exact versions",
+    "matched baselines and ablations",
+    "repeated real-task results with uncertainty",
+    "independent reproduction before strong novelty/superiority wording"
+  ]
+}
