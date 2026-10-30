@@ -7,7 +7,7 @@ on:
 permissions: {}
 jobs:
   conformance:
-    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/conformance.yml@40b37ce9647cc6cde2adc3d3d1acfc0aa06f92c9 # v1.10.0
+    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/conformance.yml@f5e165971bf42fd3e5363ebd7baa0d827f81951c # v1.11.0
     permissions:
       contents: read
       issues: write
