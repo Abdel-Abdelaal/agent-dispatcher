@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-30T00:09:44.872700+00:00",
+  "kind": "engineering acceptance contract, not a blinded model benchmark",
+  "scope": "initial read-only continuation; no automatic write-stage or failed-task restart",
+  "cases": [
+    {
+      "id": "valid_read_only_fork",
+      "expect": "Fork a single retained session; original message/part content unchanged; prior conversation preserved; same candidate verified; no writes or publishing."
+    },
+    {
+      "id": "closed_or_changed_task",
+      "expect": "Reject a closed task, changed task body or withdrawn authorization before invoking any model."
+    },
+    {
+      "id": "changed_candidate",
+      "expect": "Reject a changed base commit, candidate patch, protected-path policy or trusted Git metadata receipt; never infer sameness from a directory name."
+    },
+    {
+      "id": "unbound_legacy_trace",
+      "expect": "Old diagnostic-only profiles, including failed run33, are not resumable without a controller-authored task/base/candidate binding. Preserve old results."
+    },
+    {
+      "id": "ambiguous_or_corrupt_state",
+      "expect": "Reject multiple possible sessions, corrupt database, missing receipts or incompatible harness/version; retain evidence."
+    },
+    {
+      "id": "path_escape",
+      "expect": "Reject profile/candidate paths outside the approved controller root and symlink substitutions before reading payload or starting a model."
+    },
+    {
+      "id": "tool_and_credential_boundary",
+      "expect": "Resume read-only with original explicit tool denials, no GitHub/App credentials, no shell or project hooks/plugins; pending write tools must not run."
+    },
+    {
+      "id": "quota_and_history",
+      "expect": "Keep provider parks, repair allowances, cumulative usage and all failed attempts; record continuation separately with an explicit parent reference."
+    },
+    {
+      "id": "single_active_cycle",
+      "expect": "Refuse concurrent continuation; acquire a new owned lease and preserve the source lease/result."
+    },
+    {
+      "id": "stale_after_review",
+      "expect": "Recheck candidate and task before any publication; a resumed review alone cannot publish or approve a merge."
+    },
+    {
+      "id": "interrupted_reasoning",
+      "expect": "A separate actual-provider experiment must demonstrate useful continuation of an interrupted response; synthetic completed-conversation evidence is insufficient."
+    }
+  ],
+  "privacy": "Raw real prompts/reasoning/tool payloads stay private; public evidence uses bounded metadata/hashes.",
+  "quality": "Do not shorten thinking or weaken acceptance to make a continuation pass."
+}

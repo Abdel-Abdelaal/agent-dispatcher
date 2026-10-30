@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "provider": "local synthetic OpenAI-compatible endpoint",
+  "credential": "dummy only",
+  "live_inference": false,
+  "requests": 2,
+  "forked_sessions": 2,
+  "prior_user_and_assistant_history_preserved": true,
+  "source_session_retained": true,
+  "source_message_and_part_hash_unchanged": true,
+  "source_state_sha256": "a449f20631167f64b83edf648c65578b1e1d55f4e691bd47985116c8fe8edf3f",
+  "read_only": true,
+  "remaining_limits": "Does not establish interrupted-reasoning continuation, stale-candidate guards, provider compatibility or production resume."
+}

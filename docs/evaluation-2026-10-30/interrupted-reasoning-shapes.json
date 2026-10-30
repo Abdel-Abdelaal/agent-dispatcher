@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "provider": "local synthetic OpenAI-compatible endpoint",
+  "live_inference": false,
+  "credential": "dummy only",
+  "owned_client_timed_out": true,
+  "reasoning_durably_retained": false,
+  "reasoning_replayed_to_next_request": false,
+  "original_source_state_unchanged": true,
+  "prior_user_and_new_user_in_next_request": true,
+  "criteria_passed": false,
+  "next_request_roles_and_keys": [
+    {
+      "role": "system",
+      "keys": [
+        "content",
+        "role"
+      ]
+    },
+    {
+      "role": "user",
+      "keys": [
+        "content",
+        "role"
+      ]
+    },
+    {
+      "role": "assistant",
+      "keys": [
+        "content",
+        "reasoning_content",
+        "role"
+      ]
+    },
+    {
+      "role": "user",
+      "keys": [
+        "content",
+        "role"
+      ]
+    }
+  ],
+  "remaining_limits": "Synthetic SDK state/transport only; no actual-provider continuation, quality, stale-candidate guards or production resume established.",
+  "experiment_id": "interrupted_reasoning_value_shape_recheck",
+  "capture_time_utc": "2026-10-30T01:27:58.489543+00:00",
+  "next_request_reasoning_shapes": [
+    {
+      "role": "system",
+      "field_present": false,
+      "value_type": "NoneType",
+      "string_length": null
+    },
+    {
+      "role": "user",
+      "field_present": false,
+      "value_type": "NoneType",
+      "string_length": null
+    },
+    {
+      "role": "assistant",
+      "field_present": true,
+      "value_type": "str",
+      "string_length": 0
+    },
+    {
+      "role": "user",
+      "field_present": false,
+      "value_type": "NoneType",
+      "string_length": null
+    }
+  ]
+}

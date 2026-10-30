@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "provider": "local synthetic OpenAI-compatible endpoint",
+  "live_inference": false,
+  "credential": "dummy only",
+  "owned_client_timed_out": true,
+  "reasoning_durably_retained": false,
+  "reasoning_replayed_to_next_request": false,
+  "original_source_state_unchanged": true,
+  "prior_user_and_new_user_in_next_request": true,
+  "criteria_passed": false,
+  "next_request_roles_and_keys": [
+    {
+      "role": "system",
+      "keys": [
+        "content",
+        "role"
+      ]
+    },
+    {
+      "role": "user",
+      "keys": [
+        "content",
+        "role"
+      ]
+    },
+    {
+      "role": "assistant",
+      "keys": [
+        "content",
+        "reasoning_content",
+        "role"
+      ]
+    },
+    {
+      "role": "user",
+      "keys": [
+        "content",
+        "role"
+      ]
+    }
+  ],
+  "remaining_limits": "Synthetic SDK state/transport only; no actual-provider continuation, quality, stale-candidate guards or production resume established."
+}
