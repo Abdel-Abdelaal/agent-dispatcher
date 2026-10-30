@@ -333,6 +333,10 @@ def test_controller_call_retains_binding_before_native_process_starts(
             call()
         assert stopped.value.outcome.state is State.PARKED
         assert stopped.value.outcome.parked == "mimo"
+    elif exit_code == 124 and not snapshot_failure:
+        # Retained timed-out edits continue to the gate and an informed reviewer.
+        assert call() == "done"
+        assert run.unfinished
     elif exit_code or snapshot_failure:
         message = "20-minute limit" if exit_code == 124 else "final candidate evidence"
         with pytest.raises(Stop, match=message):
@@ -1394,6 +1398,180 @@ def test_out_of_turns_at_hard_fails_with_the_reason(
         "mimo failed while implementing (it ran out of turns even at the hard level).",
     )
     assert worker.turns == [40]
+
+
+class TimedOut(FakeModel):
+    """Edits as asked, then reports the call time limit on every non-read-only call."""
+
+    def __init__(
+        self, name: str, retention_errors: tuple[str, ...] = (), **kwargs: object
+    ) -> None:
+        super().__init__(name, **kwargs)  # pyright: ignore[reportArgumentType]
+        self.retention_errors = retention_errors
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        result = super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        if read_only:
+            return result
+        return replace(
+            result,
+            exit_code=124,
+            stop_reason="timed_out",
+            retention_errors=self.retention_errors,
+        )
+
+
+def test_timed_out_edits_go_to_the_gate_and_an_informed_reviewer(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TimedOut("mimo", edits=[{"docs/api.md": "# API\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.REVIEW
+    review_prompt, read_only = reviewer.prompts[0]
+    assert read_only
+    assert "may be\nunfinished" in review_prompt
+    assert any("hit the call time limit while implementing" in n for n in run.notes)
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert ("implement", "timed_out") in [(r["stage"], r["outcome"]) for r in records]
+
+
+def test_a_timeout_without_edits_still_fails(tmp_path: Path, origin: Path) -> None:
+    worker = TimedOut("mimo")
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex")
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute() == Outcome(
+        State.FAILED,
+        "mimo failed while implementing (it hit the 20-minute limit for one call).",
+    )
+    assert reviewer.prompts == []
+
+
+def test_a_timeout_that_lost_its_evidence_still_fails(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TimedOut(
+        "mimo",
+        retention_errors=("receipt_storage_error",),
+        edits=[{"docs/api.md": "# API\n"}],
+    )
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex")
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.FAILED
+    assert reviewer.prompts == []
+
+
+class TimesOutOnRepair(FakeModel):
+    """Finishes its implement call, then reports the time limit on the repair."""
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        repairing = "A reviewer found these problems" in prompt
+        result = super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        if repairing:
+            return replace(result, exit_code=124, stop_reason="timed_out")
+        return result
+
+
+def test_a_repair_timeout_that_changed_nothing_still_fails(
+    tmp_path: Path, origin: Path
+) -> None:
+    # The implement diff is still on disk; the repair call itself made no edits.
+    worker = TimesOutOnRepair("mimo", edits=[{"docs/api.md": "# API\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [REJECT])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute() == Outcome(
+        State.FAILED,
+        "mimo failed while implementing (it hit the 20-minute limit for one call).",
+    )
+    assert len(reviewer.prompts) == 1
+
+
+def test_a_repair_timeout_with_new_edits_goes_to_an_informed_review(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TimesOutOnRepair(
+        "mimo", edits=[{"docs/api.md": "# API\n"}, {"docs/api.md": "# API v2\n"}]
+    )
+    planner = FakeModel("claude", ["1. plan"])
+    reviewer = FakeModel("codex", [REJECT, APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert "unfinished" not in reviewer.prompts[0][0]
+    assert "may be\nunfinished" in reviewer.prompts[1][0]
+
+
+def test_a_later_finished_call_clears_the_unfinished_warning(
+    tmp_path: Path, origin: Path
+) -> None:
+    class TimesOutFirst(FakeModel):
+        def run(
+            self,
+            prompt: str,
+            worktree: Path,
+            *,
+            read_only: bool = False,
+            tuning: Tuning | None = None,
+            max_turns: int | None = None,
+        ) -> RunResult:
+            first = not self.prompts
+            result = super().run(
+                prompt,
+                worktree,
+                read_only=read_only,
+                tuning=tuning,
+                max_turns=max_turns,
+            )
+            return (
+                replace(result, exit_code=124, stop_reason="timed_out")
+                if first
+                else result
+            )
+
+    worker = TimesOutFirst(
+        "mimo", edits=[{"docs/api.md": "# API\n"}, {"docs/api.md": "# API v2\n"}]
+    )
+    planner = FakeModel("claude", ["1. plan"])
+    reviewer = FakeModel("codex", [REJECT, APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert "may be\nunfinished" in reviewer.prompts[0][0]
+    assert "unfinished" not in reviewer.prompts[1][0]
+    assert not run.unfinished
+
+
+def test_a_finished_worker_gets_no_unfinished_warning(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert "unfinished" not in reviewer.prompts[0][0]
 
 
 def test_read_only_planner_turn_cap_does_not_restart_its_conversation(
