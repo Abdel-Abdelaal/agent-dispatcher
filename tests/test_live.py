@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence
 from agent_dispatcher.dispatcher import Plan
-from agent_dispatcher.execute import Outcome, Provider, Run, json_reply, pr_title
+from agent_dispatcher.execute import Outcome, Provider, Run, Stop, json_reply, pr_title
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
@@ -33,7 +33,7 @@ from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import InvalidTransitionError, State
-from agent_dispatcher.telemetry import Telemetry
+from agent_dispatcher.telemetry import Telemetry, sha256
 from agent_dispatcher.workspace import GitError, Workspace
 
 ISSUE = Issue(
@@ -249,9 +249,11 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
     assert bound().run_id != before.run_id
 
 
+@pytest.mark.parametrize("exit_code", [0, 124])
 def test_controller_call_retains_binding_before_native_process_starts(
     tmp_path: Path,
     origin: Path,
+    exit_code: int,
 ) -> None:
     run = team_run(tmp_path, origin, models([], []), FakeGh())
     root = tmp_path / "checkpoints"
@@ -271,7 +273,8 @@ def test_controller_call_retains_binding_before_native_process_starts(
             == git(origin, "rev-parse", "HEAD").strip()
         )
         assert (profile / "config.sha256").exists()
-        return 0, json.dumps({"type": "text", "part": {"text": "done"}}), ""
+        (_cwd / "candidate.txt").write_text("partial work")
+        return exit_code, json.dumps({"type": "text", "part": {"text": "done"}}), ""
 
     class Native(MiMoOpenCode):
         @override
@@ -298,8 +301,9 @@ def test_controller_call_retains_binding_before_native_process_starts(
 
     run.providers = {"mimo": Native(SecretStr("test-only"), checkpoint_root=root)}
     clone = run.workspace.clone(str(origin), "candidate")
-    assert (
-        run._step(  # pyright: ignore[reportPrivateUsage]
+
+    def call() -> str:
+        return run._step(  # pyright: ignore[reportPrivateUsage]
             "mimo",
             "implementing",
             "private task",
@@ -307,9 +311,20 @@ def test_controller_call_retains_binding_before_native_process_starts(
             read_only=False,
             kind="implement",
         )
-        == "done"
-    )
+
+    if exit_code:
+        with pytest.raises(Stop, match="failed while"):
+            call()
+    else:
+        assert call() == "done"
     assert len(list(root.iterdir())) == 1
+    profile = next(root.iterdir())
+    candidate = json.loads((profile / "candidate.json").read_text())
+    initial = json.loads((profile / "metadata.json").read_text())["binding"]
+    assert candidate["status"] == "captured"
+    assert candidate["patch_sha256"] == sha256(run.workspace.patch(clone))
+    assert candidate["patch_sha256"] != initial["patch_sha256"]
+    assert json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
 
 
 def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> None:

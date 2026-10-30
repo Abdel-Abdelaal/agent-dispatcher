@@ -305,6 +305,7 @@ class Run:
             return adapter
         return replace(
             adapter,
+            candidate_snapshot=lambda: sha256(self.workspace.patch(clone)),
             binding=CallBinding(
                 run_id=self.run_id,
                 stage=kind,

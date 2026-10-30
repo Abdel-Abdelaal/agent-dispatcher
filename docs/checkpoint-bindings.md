@@ -14,10 +14,21 @@ Every call, including an escalation, receives a fresh binding; the shared provid
 adapter is not mutated. Direct adapter calls without controller context explicitly
 retain `binding: null`. Existing diagnostic profiles remain unbound.
 
-These are **starting-state receipts, not resumable checkpoints**. No continuation
+After the native process returns, the controller snapshots the final candidate
+through its trusted Git context. A separate `candidate.json` records that patch
+hash, including when the call timed out after making edits. Snapshot failure marks
+the call failed and the candidate unavailable; the original native result and raw
+events remain intact. A controller killed before this step has no final receipt;
+interruption during receipt writing may leave an incomplete file.
+Direct adapter calls without a controller snapshot callback do not produce it.
+The hash covers the publishable Git patch, not every ignored file or other piece
+of local context a model could read. It is not a complete filesystem integrity
+check or an operating-system sandbox.
+
+These are **state receipts, not resumable checkpoints**. No continuation
 command, automatic restart or publication authorization is enabled by them.
-Safe continuation still requires a final candidate receipt, native session and
-version validation, path and policy checks, fresh task authorization, an owned
+Safe continuation still requires native session and version validation, path and
+policy checks, fresh task authorization, an owned
 cycle lease and preservation of all failure, usage and quota history. A receipt
 does not authenticate its own contents or prove that an agent completed a task.
 Useful interrupted-response continuation also requires a real-provider experiment

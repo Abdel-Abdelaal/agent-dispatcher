@@ -135,6 +135,19 @@ def finish(profile: Path, code: int, output: str) -> None:
     )
 
 
+def finish_candidate(profile: Path, patch_sha256: str | None) -> None:
+    """Retain a separate final-state receipt without rewriting the native result."""
+    with (profile / "candidate.json").open("x", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "status": "captured" if patch_sha256 is not None else "unavailable",
+                "patch_sha256": patch_sha256,
+            },
+            handle,
+        )
+
+
 def inspect(profile: Path) -> dict[str, Any]:
     """Return only tool counters, never prompts, reasoning, paths or tool payloads."""
     result: dict[str, Any] = {"retained": True, "native_state": "unavailable"}

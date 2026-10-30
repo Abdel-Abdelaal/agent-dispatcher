@@ -3,8 +3,8 @@
 import json
 import os
 import tempfile
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -23,6 +23,7 @@ from agent_dispatcher.providers import (
     scrubbed_env,
     subprocess_runner,
 )
+from agent_dispatcher.workspace import GitError
 
 
 def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
@@ -67,6 +68,7 @@ class MiMoOpenCode:
     reasoning: Literal["enabled", "disabled"] = "enabled"
     checkpoint_root: Path | None = None
     binding: native_evidence.CallBinding | None = None
+    candidate_snapshot: Callable[[], str] | None = None
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -124,6 +126,7 @@ class MiMoOpenCode:
         """Isolate ambient config; optionally retain private native diagnostic state."""
         del tuning
         config = self.config(read_only=read_only, steps=max_turns or 15)
+        snapshot_failed = False
         with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
             root = Path(tmp)
             evidence = root
@@ -177,8 +180,15 @@ class MiMoOpenCode:
             code, stdout, stderr = runner(argv, worktree, "", env)
             if self.checkpoint_root is not None:
                 native_evidence.finish(evidence, code, stdout)
+                if self.candidate_snapshot is not None:
+                    try:
+                        candidate = self.candidate_snapshot()
+                    except (GitError, OSError):
+                        candidate = None
+                        snapshot_failed = True
+                    native_evidence.finish_candidate(evidence, candidate)
         text, usage, failed = events(stdout)
-        return provider_result(
+        result = provider_result(
             self.name,
             code or int(failed),
             stdout,
@@ -187,4 +197,13 @@ class MiMoOpenCode:
             harness="opencode",
             tuning=Tuning(MIMO_MODEL, ""),
             usage=usage,
+        )
+        return (
+            replace(
+                result,
+                exit_code=result.exit_code or 1,
+                stop_reason=result.stop_reason or "candidate_unavailable",
+            )
+            if snapshot_failed
+            else result
         )

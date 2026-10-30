@@ -36,6 +36,16 @@ def native_db(profile: Path) -> None:
         db.executemany("INSERT INTO part VALUES(?)", [(json.dumps(x),) for x in parts])
 
 
+def test_final_candidate_receipt_cannot_overwrite_an_existing_one(
+    tmp_path: Path,
+) -> None:
+    native_evidence.finish_candidate(tmp_path, "a" * 64)
+    before = (tmp_path / "candidate.json").read_bytes()
+    with pytest.raises(FileExistsError):
+        native_evidence.finish_candidate(tmp_path, "b" * 64)
+    assert (tmp_path / "candidate.json").read_bytes() == before
+
+
 def test_partial_native_state_returns_counters_without_confidential_payloads(
     tmp_path: Path,
 ) -> None:

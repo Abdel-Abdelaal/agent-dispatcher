@@ -4,12 +4,14 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+import pytest
 from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence
 from agent_dispatcher.opencode_worker import MiMoOpenCode, events
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
+from agent_dispatcher.workspace import GitError
 
 
 def test_event_parser_keeps_final_reply_and_known_usage() -> None:
@@ -168,3 +170,50 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
     )
     assert "raw issue" not in metadata
     assert not cache[0].exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 124, 429])
+def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
+    tmp_path: Path,
+    exit_code: int,
+) -> None:
+    def snapshot() -> str:
+        message = "private error details"
+        raise GitError(message)
+
+    def runner(
+        _argv: list[str],
+        _cwd: Path,
+        _stdin: str,
+        _env: Mapping[str, str],
+    ) -> tuple[int, str, str]:
+        output = json.dumps(
+            {
+                "type": "step_finish",
+                "part": {"tokens": {"input": 10, "output": 2, "reasoning": 4}},
+            }
+        )
+        return exit_code, output, "quota exhausted" if exit_code == 429 else ""
+
+    worker = MiMoOpenCode(
+        SecretStr("test-only"),
+        checkpoint_root=tmp_path / "checkpoints",
+        candidate_snapshot=snapshot,
+    )
+    result = worker.run("private task", tmp_path, runner=runner, environ={})
+    assert result.exit_code != 0
+    assert result.exhausted is (exit_code == 429)
+    assert result.usage == {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "reasoning_tokens": 4,
+    }
+    assert result.stop_reason == (
+        "timed_out" if exit_code == 124 else "candidate_unavailable"
+    )
+    profile = next((tmp_path / "checkpoints").iterdir())
+    receipt = json.loads((profile / "candidate.json").read_text())
+    assert receipt["status"] == "unavailable"
+    assert receipt["patch_sha256"] is None
+    assert "private error details" not in json.dumps(receipt)
+    assert json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
