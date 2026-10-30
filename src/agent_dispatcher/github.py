@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -13,6 +13,7 @@ API = "https://api.github.com"
 _AGENT_BRANCH = re.compile(r"^agent/(?P<issue>\d+)-run-\d+$")
 # Advisory checks never block a merge, so they never trigger a repair either.
 _ADVISORY = ("review / ai",)
+_EVENTS_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -203,12 +204,25 @@ class GitHubReader:
 
     def labelled_by(self, repo: str, number: int) -> str | None:
         """Return who most recently added the ready label, from the issue events."""
-        events = self._get(f"/repos/{repo}/issues/{number}/events", {"per_page": 100})
-        actors = [
-            event["actor"]["login"]
-            for event in events
-            if event.get("event") == "labeled"
-            and event.get("label", {}).get("name") == State.READY.value
-            and event.get("actor")
-        ]
-        return actors[-1] if actors else None
+        page = 1
+        actor: str | None = None
+        while True:
+            events = self._get(
+                f"/repos/{repo}/issues/{number}/events",
+                {"per_page": _EVENTS_PAGE_SIZE, "page": page},
+            )
+            for event in events:
+                if (
+                    event.get("event") == "labeled"
+                    and event.get("label", {}).get("name") == State.READY.value
+                ):
+                    current_actor = event.get("actor")
+                    login = (
+                        cast("dict[str, object]", current_actor).get("login")
+                        if isinstance(current_actor, dict)
+                        else None
+                    )
+                    actor = login if isinstance(login, str) else None
+            if len(events) < _EVENTS_PAGE_SIZE:
+                return actor
+            page += 1

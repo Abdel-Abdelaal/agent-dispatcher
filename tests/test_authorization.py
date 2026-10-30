@@ -166,3 +166,29 @@ def test_ambiguous_agent_labels_are_rejected_at_intake():
         is_open=True,
     )
     assert not accepts(issue, "owner")
+
+
+@pytest.mark.parametrize("latest_actor", ["someone", None])
+def test_latest_ready_actor_is_read_beyond_first_event_page(latest_actor: str | None):
+    owner_label = {
+        "event": "labeled",
+        "label": {"name": "agent:ready"},
+        "actor": {"login": "owner"},
+    }
+    attacker_label = {
+        "event": "labeled",
+        "label": {"name": "agent:ready"},
+        "actor": {"login": latest_actor} if latest_actor is not None else None,
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        page = request.url.params.get("page", "1")
+        events = (
+            [owner_label, *[{"event": "commented"}] * 99]
+            if page == "1"
+            else [attacker_label]
+        )
+        return httpx.Response(200, json=events)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        assert GitHubReader(client).labelled_by("owner/repo", 7) == latest_actor
