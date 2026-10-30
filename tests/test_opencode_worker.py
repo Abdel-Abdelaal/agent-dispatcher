@@ -70,6 +70,7 @@ def test_run_isolates_config_state_and_prompt_then_cleans_it(tmp_path: Path) -> 
     def runner(
         argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
     ) -> tuple[int, str, str]:
+        assert argv[argv.index("--title") + 1] == "Agent task"
         task = Path(argv[argv.index("--file") + 1])
         captured.append(task.parent)
         assert task.read_text() == "untrusted $(command) task"

@@ -154,6 +154,8 @@ class MiMoOpenCode:
             argv = [
                 self.executable,
                 "run",
+                "--title",
+                "Agent task",
                 "--agent",
                 "build",
                 "--format",

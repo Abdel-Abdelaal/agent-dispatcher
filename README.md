@@ -228,6 +228,11 @@ against changes occurring between requests. A refusal after an authorized branch
 push can leave that branch without a draft PR. Provider quota and repair history
 are retained.
 
+One-shot OpenCode API adapters use a constant session title to prevent the
+client from requesting an extra model-generated title. This does not shorten
+task reasoning, disable compaction or change the interactive chat interface.
+It does not establish complete accounting for every possible internal SDK call.
+
 ## Credits
 
 This code is independent, but the design borrows ideas from these open-source

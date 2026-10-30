@@ -534,6 +534,8 @@ class OpenCodeCli:
         argv = [
             "opencode",
             "run",
+            "--title",
+            "Agent task",
             "--model",
             f"worker/{self.model}",
             "--file",
