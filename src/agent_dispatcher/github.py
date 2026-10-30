@@ -68,6 +68,7 @@ class GitHubReader:
                 body=row.get("body") or "",
                 labels=tuple(label["name"] for label in row["labels"]),
                 labelled_by=self.labelled_by(repo, row["number"]),
+                is_open=row.get("state") == "open",
             )
             for row in rows
             if "pull_request" not in row
@@ -87,6 +88,34 @@ class GitHubReader:
             body=row.get("body") or "",
             labels=tuple(label["name"] for label in row["labels"]),
             labelled_by=self.labelled_by(repo, number),
+            is_open=row.get("state") == "open",
+        )
+
+    def authorized_task(self, original: Issue, owner: str, expected: State) -> bool:
+        """Recheck public scope, raw task content and the owner's current authority."""
+        response = self._client.get(
+            f"{API}/repos/{original.repo}", headers=self._headers, timeout=30
+        )
+        response.raise_for_status()
+        repo = response.json()
+        if not (
+            repo.get("private") is False
+            and repo.get("archived") is False
+            and repo.get("disabled") is False
+            and repo.get("visibility") == "public"
+            and str(repo.get("full_name", "")).lower() == original.repo.lower()
+            and str(repo.get("owner", {}).get("login", "")).lower() == owner.lower()
+        ):
+            return False
+        current = self.issue(original.repo, original.number)
+        states = {label for label in current.labels if label.startswith("agent:")}
+        return (
+            original.is_open
+            and current.is_open
+            and current.title == original.title
+            and current.body == original.body
+            and current.labelled_by == owner
+            and states == {expected.value}
         )
 
     def owned_public_repos(self, owner: str) -> list[str]:

@@ -216,6 +216,17 @@ flowchart LR
   PR --> CI[Fleet required checks] --> Merge[Abdel merges]
 ```
 
+Before work, branch publication, draft creation and CI-repair publication, the
+controller rechecks that the repository is public, owned by the configured owner,
+active, and that the task is open, unchanged since this run began, and in the expected
+authorized state.
+Missing verification or a failed lookup refuses the operation. After detecting
+revocation it does not post cleanup comments or change labels. GitHub reads and
+writes are separate requests; these checks do not provide an atomic transaction
+against changes occurring between requests. A refusal after an authorized branch
+push can leave that branch without a draft PR. Provider quota and repair history
+are retained.
+
 ## Credits
 
 This code is independent, but the design borrows ideas from these open-source

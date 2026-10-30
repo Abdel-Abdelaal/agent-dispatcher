@@ -242,6 +242,10 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         skip_easy_docs_plan=settings.skip_plan_for_easy_docs,
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
+        authorize=lambda original, expected: GitHubReader(
+            client,
+            settings.github_token.get_secret_value() if settings.github_token else None,
+        ).authorized_task(original, settings.owner, expected),
     )
 
 

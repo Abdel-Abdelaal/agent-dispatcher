@@ -184,6 +184,7 @@ def team_run(
         triage=None if triage is None else (lambda _system, _user: triage),
         ladder=DEFAULT_LADDER,
         remote=str(origin),
+        authorize=lambda _issue, _expected: True,
     )
 
 
@@ -1388,3 +1389,72 @@ def test_error_lines_fall_back_to_the_cleaned_tail() -> None:
 def test_error_lines_keep_spelling_details() -> None:
     log = "tests/test_api.py:7: typo ==> correction\nCleaning up orphan processes"
     assert error_lines(log) == "tests/test_api.py:7: typo ==> correction"
+
+
+@pytest.mark.parametrize("failure", ["revoked", "unavailable", "missing_adapter"])
+def test_publication_authority_refusal_never_pushes_or_comments(
+    tmp_path: Path, origin: Path, failure: str
+):
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+    gh = FakeGh()
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), gh)
+    checks: list[State] = []
+
+    def authorize(_issue: Issue, expected: State) -> bool:
+        checks.append(expected)
+        if len(checks) == 1:
+            return True
+        if failure == "unavailable":
+            raise OSError
+        return False
+
+    run.authorize = None if failure == "missing_adapter" else authorize
+    assert run.execute().state is State.FAILED
+    assert not any(argv[1:3] == ["pr", "create"] for argv, _ in gh.calls)
+    assert not gh.comments()
+    assert git(origin, "for-each-ref", "refs/heads/agent/") == ""
+    if failure == "missing_adapter":
+        assert not gh.calls
+        assert not planner.prompts
+    else:
+        assert checks == [State.READY, State.RUNNING]
+        assert gh.labels() == [("agent:ready", "agent:running")]
+
+
+def test_authority_is_rechecked_between_push_and_draft_pr(tmp_path: Path, origin: Path):
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+    gh = FakeGh()
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), gh)
+    checks: list[State] = []
+
+    def authorize(_issue: Issue, expected: State) -> bool:
+        checks.append(expected)
+        return len(checks) < 3
+
+    run.authorize = authorize
+    assert run.execute().state is State.FAILED
+    assert checks == [State.READY, State.RUNNING, State.RUNNING]
+    assert not any(argv[1:3] == ["pr", "create"] for argv, _ in gh.calls)
+    assert not gh.comments()
+    assert git(origin, "for-each-ref", "refs/heads/agent/")
+
+
+@pytest.mark.parametrize("deny_at", [1, 2])
+def test_repair_authority_refusal_preserves_branch_and_writes_nothing(
+    tmp_path: Path, origin: Path, deny_at: int
+):
+    pr = published_pr(tmp_path, origin)
+    before = git(origin, "rev-parse", pr.branch)
+    worker = FakeModel("claude", edits=[{"docs/api.md": "# Fixed\n"}])
+    run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex", [APPROVE]))
+    checks: list[State] = []
+
+    def authorize(_issue: Issue, expected: State) -> bool:
+        checks.append(expected)
+        return len(checks) < deny_at
+
+    run.authorize = authorize
+    assert run.repair(pr, "Synthetic CI error").state is State.FAILED
+    assert checks == [State.REVIEW] * deny_at
+    assert git(origin, "rev-parse", pr.branch) == before
+    assert not gh.calls

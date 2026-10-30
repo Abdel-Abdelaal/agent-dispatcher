@@ -60,6 +60,7 @@ def github_client() -> httpx.Client:
     issues: list[dict[str, object]] = [
         {
             "number": 7,
+            "state": "open",
             "title": "Add test",
             "body": None,
             "labels": [{"name": "agent:ready"}],
