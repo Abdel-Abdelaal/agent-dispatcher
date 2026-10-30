@@ -219,16 +219,18 @@ class Run:
 
     def _check_authority(self, expected: State) -> bool:
         """Fail closed before work or publication; never write after revocation."""
+        outcome = "refused" if self.authorize is not None else "unavailable"
         try:
             allowed = self.authorize is not None and self.authorize(
                 self.issue, expected
             )
         except Exception:  # noqa: BLE001 - verification failure cannot authorize writes
             allowed = False
+            outcome = "unavailable"
         if allowed is True:
             return True
         self._authority_denied = True
-        self._record("authorization", "controller", outcome="refused")
+        self._record("authorization", "controller", outcome=outcome)
         return False
 
     def _authority_failure(self) -> Outcome:
@@ -620,6 +622,10 @@ class Run:
             )
         if self._authority_denied:
             return outcome
+        if outcome.state in {State.PARKED, State.FAILED} and not self._check_authority(
+            State.RUNNING
+        ):
+            return outcome
         if outcome.state is State.PARKED:
             self.writer.move(repo, number, State.RUNNING, State.PARKED)
         elif outcome.state is State.FAILED:
@@ -716,6 +722,10 @@ class Run:
                 "error", "controller", outcome="error", reason=type(error).__name__
             )
         if self._authority_denied:
+            return outcome
+        if outcome.state is not State.PARKED and not self._check_authority(
+            State.REVIEW
+        ):
             return outcome
         if outcome.state is not State.PARKED:
             verb = "pushed a CI repair" if outcome.state is State.REVIEW else "stopped"

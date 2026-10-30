@@ -10,7 +10,9 @@ NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
 
 
 def issue(number: int) -> Issue:
-    return Issue("o/r", number, f"task {number}", "", ("agent:ready",), "owner")
+    return Issue(
+        "o/r", number, f"task {number}", "", ("agent:ready",), "owner", is_open=True
+    )
 
 
 @pytest.fixture

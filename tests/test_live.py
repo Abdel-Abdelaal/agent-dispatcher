@@ -12,7 +12,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from agent_dispatcher import cli
+from agent_dispatcher import cli, native_evidence
 from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import Outcome, Provider, Run, json_reply, pr_title
 from agent_dispatcher.gate import Limits
@@ -29,7 +29,13 @@ from agent_dispatcher.telemetry import Telemetry
 from agent_dispatcher.workspace import GitError, Workspace
 
 ISSUE = Issue(
-    "o/r", 7, "Document the API.", "Add docs", ("agent:ready", "documentation"), "owner"
+    "o/r",
+    7,
+    "Document the API.",
+    "Add docs",
+    ("agent:ready", "documentation"),
+    "owner",
+    is_open=True,
 )
 TEAM = Team(planner="claude", worker="mimo", reviewer="codex")
 APPROVE = json.dumps({"approve": True, "summary": "Looks right.", "findings": []})
@@ -362,7 +368,7 @@ def test_gh_failures_raise(tmp_path: Path) -> None:
 
 
 def test_pr_title_is_conventional_and_bounded() -> None:
-    long = Issue("o/r", 1, "Fix " + "x" * 200, "", ("bug",), "owner")
+    long = Issue("o/r", 1, "Fix " + "x" * 200, "", ("bug",), "owner", is_open=True)
     assert pr_title(long).startswith("fix: fix x")
     assert len(pr_title(long)) <= 72
 
@@ -382,7 +388,9 @@ def test_pr_title_preserves_valid_intent_without_double_prefix(
     labels: tuple[str, ...],
     expected: str,
 ) -> None:
-    assert pr_title(Issue("o/r", 1, title, "", labels, "owner")) == expected
+    assert (
+        pr_title(Issue("o/r", 1, title, "", labels, "owner", is_open=True)) == expected
+    )
 
 
 def test_json_reply_finds_the_object_or_nothing() -> None:
@@ -432,7 +440,7 @@ def test_run_live_records_and_parks_the_named_provider(
 
     class Reader:
         def issue(self, repo: str, number: int) -> Issue:
-            return Issue(repo, number, "t", "", ("agent:ready",), "owner")
+            return Issue(repo, number, "t", "", ("agent:ready",), "owner", is_open=True)
 
     monkeypatch.setattr(cli, "Run", ParkedRun)
     queue = RunQueue(tmp_path / "q.sqlite3")
@@ -1408,8 +1416,18 @@ def test_publication_authority_refusal_never_pushes_or_comments(
             raise OSError
         return False
 
+    run.telemetry = Telemetry(tmp_path / "telemetry")
     run.authorize = None if failure == "missing_adapter" else authorize
     assert run.execute().state is State.FAILED
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    decision = native_evidence.metrics(records[-1])
+    assert decision["stage"] == "authorization"
+    assert decision["outcome"] == ("refused" if failure == "revoked" else "unavailable")
     assert not any(argv[1:3] == ["pr", "create"] for argv, _ in gh.calls)
     assert not gh.comments()
     assert git(origin, "for-each-ref", "refs/heads/agent/") == ""
@@ -1458,3 +1476,26 @@ def test_repair_authority_refusal_preserves_branch_and_writes_nothing(
     assert checks == [State.REVIEW] * deny_at
     assert git(origin, "rev-parse", pr.branch) == before
     assert not gh.calls
+
+
+def test_revoked_task_skips_quota_cleanup_but_preserves_provider_park(
+    tmp_path: Path, origin: Path
+):
+    planner, worker, reviewer = models([], [])
+    worker.exhausted = True
+    gh = FakeGh()
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), gh)
+    checks: list[State] = []
+
+    def authorize(_issue: Issue, expected: State) -> bool:
+        checks.append(expected)
+        return len(checks) == 1
+
+    run.authorize = authorize
+    outcome = run.execute()
+    assert outcome.state is State.PARKED
+    assert outcome.parked == "mimo"
+    assert outcome.resets_at == datetime(2026, 10, 26, tzinfo=UTC)
+    assert checks == [State.READY, State.RUNNING]
+    assert gh.labels() == [("agent:ready", "agent:running")]
+    assert not gh.comments()

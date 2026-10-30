@@ -41,7 +41,7 @@ class Issue:
     body: str
     labels: tuple[str, ...]
     labelled_by: str | None
-    is_open: bool = True
+    is_open: bool
 
 
 def sanitise(text: str) -> str:
@@ -71,6 +71,7 @@ def accepts(issue: Issue, owner: str) -> bool:
     """
     return (
         issue.is_open
-        and State.READY.value in issue.labels
+        and {label for label in issue.labels if label.startswith("agent:")}
+        == {State.READY.value}
         and issue.labelled_by == owner
     )

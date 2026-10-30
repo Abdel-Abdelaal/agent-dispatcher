@@ -11,6 +11,7 @@ def make_issue(
         body=body,
         labels=("agent:ready",),
         labelled_by=labelled_by,
+        is_open=True,
     )
 
 
@@ -46,5 +47,5 @@ def test_only_the_owner_label_is_accepted() -> None:
 
 
 def test_issue_without_ready_label_is_not_accepted() -> None:
-    issue = Issue("o/r", 1, "t", "b", ("bug",), "owner")
+    issue = Issue("o/r", 1, "t", "b", ("bug",), "owner", is_open=True)
     assert not accepts(issue, "owner")
