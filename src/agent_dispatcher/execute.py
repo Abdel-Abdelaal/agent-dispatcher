@@ -292,6 +292,7 @@ class Run:
             exhausted=result.exhausted,
             resets_at=result.resets_at.isoformat() if result.resets_at else None,
             usage=result.usage,
+            retention_errors=list(result.retention_errors),
             **self._output(result.text),
         )
 

@@ -251,7 +251,8 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
 
 
 @pytest.mark.parametrize(
-    ("exit_code", "snapshot_failure"), [(0, False), (124, False), (0, True)]
+    ("exit_code", "snapshot_failure"),
+    [(0, False), (124, False), (0, True), (124, True), (429, True)],
 )
 def test_controller_call_retains_binding_before_native_process_starts(
     tmp_path: Path,
@@ -284,7 +285,11 @@ def test_controller_call_retains_binding_before_native_process_starts(
             monkeypatch.setattr(
                 run.workspace, "patch", Mock(side_effect=GitError("snapshot refused"))
             )
-        return exit_code, json.dumps({"type": "text", "part": {"text": "done"}}), ""
+        return (
+            exit_code,
+            json.dumps({"type": "text", "part": {"text": "done"}}),
+            ("quota exhausted" if exit_code == 429 else ""),
+        )
 
     class Native(MiMoOpenCode):
         @override
@@ -322,8 +327,13 @@ def test_controller_call_retains_binding_before_native_process_starts(
             kind="implement",
         )
 
-    if exit_code or snapshot_failure:
-        message = "final candidate evidence" if snapshot_failure else "failed while"
+    if exit_code == 429:
+        with pytest.raises(Stop, match="quota exhausted") as stopped:
+            call()
+        assert stopped.value.outcome.state is State.PARKED
+        assert stopped.value.outcome.parked == "mimo"
+    elif exit_code or snapshot_failure:
+        message = "20-minute limit" if exit_code == 124 else "final candidate evidence"
         with pytest.raises(Stop, match=message):
             call()
     else:

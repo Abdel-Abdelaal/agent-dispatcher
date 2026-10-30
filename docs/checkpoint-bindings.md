@@ -19,8 +19,11 @@ controller snapshots the final candidate through its trusted Git context.
 A separate `candidate.json` records that patch hash, including when the call timed
 out after making edits. Snapshot or receipt-write failure prevents success;
 existing quota exhaustion still parks the task and existing timeouts remain
-timeouts. Provider usage and the original result are preserved when storage
-permits; a disk failure can leave missing or partial evidence files. A controller
+timeouts. Usage remains on the returned result; the original native exit code and
+events remain in evidence files when storage permits. The result returned to the
+controller is failed closed. Fixed error categories distinguish snapshot, callback
+and storage failures without retaining exception messages or private paths.
+A disk failure can leave missing or partial evidence files. A controller
 killed before this step has no final receipt;
 interruption during receipt writing may leave an incomplete file.
 Direct adapter calls without a controller snapshot callback do not produce it.

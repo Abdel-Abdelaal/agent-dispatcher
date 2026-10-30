@@ -3,12 +3,14 @@
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from pydantic import SecretStr
 
-from agent_dispatcher import cli, native_evidence
+from agent_dispatcher import cli, native_evidence, opencode_worker
 from agent_dispatcher.opencode_worker import MiMoOpenCode, events
+from agent_dispatcher.providers import RunResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
 from agent_dispatcher.workspace import GitError
@@ -173,7 +175,9 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
 
 
 @pytest.mark.parametrize("exit_code", [0, 124, 429])
-@pytest.mark.parametrize("failure", ["callback", "unexpected", "receipt", "native"])
+@pytest.mark.parametrize(
+    "failure", ["callback", "callback_os", "unexpected", "receipt", "native"]
+)
 def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
     tmp_path: Path,
     exit_code: int,
@@ -182,13 +186,16 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
 ) -> None:
     def snapshot() -> str:
         message = "private error details"
-        if failure == "callback":
-            raise GitError(message)
-        if failure == "unexpected":
-            raise RuntimeError(message)
+        error = {
+            "callback": GitError,
+            "callback_os": OSError,
+            "unexpected": RuntimeError,
+        }.get(failure)
+        if error is not None:
+            raise error(message)
         return sha256("candidate")
 
-    def storage_failure(*_args: object) -> None:
+    def storage_failure(*_args: object, **_kwargs: object) -> None:
         message = "storage unavailable"
         raise OSError(message)
 
@@ -218,6 +225,14 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
     )
     result = worker.run("private task", tmp_path, runner=runner, environ={})
     assert result.exit_code != 0
+    expected_error = {
+        "callback": "snapshot_git_error",
+        "callback_os": "snapshot_os_error",
+        "unexpected": "snapshot_callback_error",
+        "receipt": "receipt_storage_error",
+        "native": "native_storage_error",
+    }[failure]
+    assert result.retention_errors == (expected_error,)
     assert result.exhausted is (exit_code == 429)
     assert result.usage == {
         "input_tokens": 10,
@@ -239,6 +254,7 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
             sha256("candidate") if failure == "native" else None
         )
         assert "private error details" not in json.dumps(receipt)
+        assert receipt["retention_errors"] == [expected_error]
     if failure == "native":
         assert not (profile / "result.json").exists()
     else:
@@ -252,3 +268,39 @@ def test_snapshot_without_retained_state_is_refused() -> None:
         MiMoOpenCode(
             SecretStr("test-only"), candidate_snapshot=lambda: sha256("candidate")
         )
+
+
+def test_retention_failure_cannot_request_another_turn_escalation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opencode_worker,
+        "provider_result",
+        Mock(
+            return_value=RunResult(
+                "mimo", 0, "", exhausted=False, stop_reason="max_turns"
+            )
+        ),
+    )
+
+    def snapshot() -> str:
+        message = "snapshot unavailable"
+        raise GitError(message)
+
+    def runner(
+        _argv: list[str],
+        _cwd: Path,
+        _stdin: str,
+        _env: Mapping[str, str],
+    ) -> tuple[int, str, str]:
+        return 0, "", ""
+
+    worker = MiMoOpenCode(
+        SecretStr("test-only"),
+        checkpoint_root=tmp_path / "checkpoints",
+        candidate_snapshot=snapshot,
+    )
+    result = worker.run("task", tmp_path, runner=runner, environ={})
+    assert result.stop_reason == "candidate_unavailable"
+    assert result.exit_code == 1

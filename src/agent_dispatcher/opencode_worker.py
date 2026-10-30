@@ -23,6 +23,7 @@ from agent_dispatcher.providers import (
     scrubbed_env,
     subprocess_runner,
 )
+from agent_dispatcher.workspace import GitError
 
 
 def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
@@ -75,25 +76,29 @@ class MiMoOpenCode:
             message = "Candidate snapshots require retained checkpoint state."
             raise ValueError(message)
 
-    def _retain(self, profile: Path, code: int, output: str) -> bool:
+    def _retain(self, profile: Path, code: int, output: str) -> tuple[str, ...]:
         """Quarantine retention failures without losing the provider's result."""
-        retained = True
+        errors: list[str] = []
         try:
             native_evidence.finish(profile, code, output)
         except OSError:
-            retained = False
+            errors.append("native_storage_error")
         if self.candidate_snapshot is None:
-            return retained
+            return tuple(errors)
+        candidate = None
         try:
             candidate = self.candidate_snapshot()
-        except Exception:  # noqa: BLE001 - a callback failure cannot discard usage/history
-            candidate = None
-            retained = False
-        try:
-            native_evidence.finish_candidate(profile, candidate)
+        except GitError:
+            errors.append("snapshot_git_error")
         except OSError:
-            retained = False
-        return retained
+            errors.append("snapshot_os_error")
+        except Exception:  # noqa: BLE001 - a callback failure cannot discard usage/history
+            errors.append("snapshot_callback_error")
+        try:
+            native_evidence.finish_candidate(profile, candidate, errors=tuple(errors))
+        except OSError:
+            errors.append("receipt_storage_error")
+        return tuple(errors)
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -151,7 +156,7 @@ class MiMoOpenCode:
         """Isolate ambient config; optionally retain private native diagnostic state."""
         del tuning
         config = self.config(read_only=read_only, steps=max_turns or 15)
-        snapshot_failed = False
+        retention_errors: tuple[str, ...] = ()
         with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
             root = Path(tmp)
             evidence = root
@@ -204,7 +209,7 @@ class MiMoOpenCode:
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
             if self.checkpoint_root is not None:
-                snapshot_failed = not self._retain(evidence, code, stdout)
+                retention_errors = self._retain(evidence, code, stdout)
         text, usage, failed = events(stdout)
         result = provider_result(
             self.name,
@@ -220,8 +225,13 @@ class MiMoOpenCode:
             replace(
                 result,
                 exit_code=result.exit_code or 1,
-                stop_reason=result.stop_reason or "candidate_unavailable",
+                stop_reason=(
+                    "timed_out"
+                    if result.stop_reason == "timed_out"
+                    else "candidate_unavailable"
+                ),
+                retention_errors=retention_errors,
             )
-            if snapshot_failed
+            if retention_errors
             else result
         )
