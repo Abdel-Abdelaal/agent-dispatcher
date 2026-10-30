@@ -13,6 +13,9 @@ def test_research_evidence_manifest_matches_public_files():
         json.loads((root / "manifest.json").read_text(encoding="utf-8")),
     )
     hashes = cast("dict[str, str]", manifest["sha256"])
+    assert set(hashes) == {path.name for path in root.glob("*.json")} - {
+        "manifest.json",
+    }
     assert "experiment-plan.json" in hashes
     assert "continuation-acceptance.json" in hashes
     for name, expected in hashes.items():
