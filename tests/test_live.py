@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import override
 
 import httpx
 import pytest
@@ -19,7 +20,14 @@ from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.levels import DEFAULT_LADDER, Level
-from agent_dispatcher.providers import ClaudeCli, RunResult, Tuning, subprocess_runner
+from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.providers import (
+    ClaudeCli,
+    Runner,
+    RunResult,
+    Tuning,
+    subprocess_runner,
+)
 from agent_dispatcher.publish import GitHubWriter, PublishError, error_lines
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
@@ -202,6 +210,106 @@ def models(
         FakeModel("mimo", edits=edits),
         FakeModel("codex", reviews),
     )
+
+
+def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    run = team_run(tmp_path, origin, models([], []), FakeGh())
+    adapter = MiMoOpenCode(
+        SecretStr("test-only"), checkpoint_root=tmp_path / "checkpoints"
+    )
+    run.providers = {"mimo": adapter}
+    clone = run.workspace.clone(str(origin), "candidate")
+
+    def bound() -> native_evidence.CallBinding:
+        result = run._bound_provider("mimo", "implement", clone)  # pyright: ignore[reportPrivateUsage]
+        assert isinstance(result, MiMoOpenCode)
+        assert result.binding is not None
+        return result.binding
+
+    before = bound()
+    assert before.run_id == run.run_id
+    assert before.base_commit == git(origin, "rev-parse", "HEAD").strip()
+    assert adapter.binding is None  # Per-call binding cannot leak into later runs.
+    (clone / "candidate.txt").write_text("new code")
+    changed = bound()
+    assert changed.patch_sha256 != before.patch_sha256
+    assert changed.task_sha256 == before.task_sha256
+    run.issue = replace(run.issue, body=run.issue.body + " changed")
+    assert bound().task_sha256 != before.task_sha256
+    run.limits = replace(run.limits, allow_test_deletions=True)
+    assert bound().policy_sha256 != before.policy_sha256
+    other_stage = run._bound_provider("mimo", "review", clone)  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(other_stage, MiMoOpenCode)
+    assert other_stage.binding is not None
+    assert other_stage.binding.stage == "review"
+    run.run_id += 1
+    assert bound().run_id != before.run_id
+
+
+def test_controller_call_retains_binding_before_native_process_starts(
+    tmp_path: Path,
+    origin: Path,
+) -> None:
+    run = team_run(tmp_path, origin, models([], []), FakeGh())
+    root = tmp_path / "checkpoints"
+
+    def runner(
+        _argv: list[str],
+        _cwd: Path,
+        _stdin: str,
+        env: Mapping[str, str],
+    ) -> tuple[int, str, str]:
+        profile = Path(env["XDG_DATA_HOME"]).parent
+        metadata = json.loads((profile / "metadata.json").read_text())
+        assert metadata["binding"]["run_id"] == run.run_id
+        assert metadata["binding"]["stage"] == "implement"
+        assert (
+            metadata["binding"]["base_commit"]
+            == git(origin, "rev-parse", "HEAD").strip()
+        )
+        assert (profile / "config.sha256").exists()
+        return 0, json.dumps({"type": "text", "part": {"text": "done"}}), ""
+
+    class Native(MiMoOpenCode):
+        @override
+        def run(
+            self,
+            prompt: str,
+            worktree: Path,
+            *,
+            read_only: bool = False,
+            tuning: Tuning | None = None,
+            max_turns: int | None = None,
+            runner: Runner = runner,
+            environ: Mapping[str, str] | None = None,
+        ) -> RunResult:
+            return super().run(
+                prompt,
+                worktree,
+                read_only=read_only,
+                tuning=tuning,
+                max_turns=max_turns,
+                runner=runner,
+                environ={} if environ is None else environ,
+            )
+
+    run.providers = {"mimo": Native(SecretStr("test-only"), checkpoint_root=root)}
+    clone = run.workspace.clone(str(origin), "candidate")
+    assert (
+        run._step(  # pyright: ignore[reportPrivateUsage]
+            "mimo",
+            "implementing",
+            "private task",
+            clone,
+            read_only=False,
+            kind="implement",
+        )
+        == "done"
+    )
+    assert len(list(root.iterdir())) == 1
 
 
 def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> None:

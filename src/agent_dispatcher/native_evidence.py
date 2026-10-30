@@ -4,11 +4,25 @@ import json
 import sqlite3
 import uuid
 from collections import Counter
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 from agent_dispatcher.telemetry import sha256
+
+
+@dataclass(frozen=True)
+class CallBinding:
+    """Controller-authored identity of a call; not authorization to resume it."""
+
+    run_id: int
+    stage: str
+    task_sha256: str
+    base_commit: str
+    patch_sha256: str
+    policy_sha256: str
+
 
 _TOOLS = {"read", "glob", "grep", "list", "edit", "write", "apply_patch", "batch"}
 _STATES = {"pending", "running", "completed", "error"}
@@ -78,8 +92,14 @@ def metrics(row: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def create(
-    root: Path, workspace: Path, prompt: str, *, read_only: bool, reasoning: str
+def create(  # noqa: PLR0913 - optional controller binding accompanies native context
+    root: Path,
+    workspace: Path,
+    prompt: str,
+    *,
+    read_only: bool,
+    reasoning: str,
+    binding: CallBinding | None = None,
 ) -> Path:
     """Retain local diagnostic context outside the model's editable worktree."""
     profile = root / (workspace.name + "-" + uuid.uuid4().hex)
@@ -92,6 +112,7 @@ def create(
                 "prompt_sha256": sha256(prompt),
                 "read_only": read_only,
                 "reasoning": reasoning,
+                "binding": asdict(binding) if binding is not None else None,
             }
         ),
         encoding="utf-8",
