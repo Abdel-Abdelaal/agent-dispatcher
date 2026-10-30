@@ -23,7 +23,6 @@ from agent_dispatcher.providers import (
     scrubbed_env,
     subprocess_runner,
 )
-from agent_dispatcher.workspace import GitError
 
 
 def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
@@ -69,6 +68,32 @@ class MiMoOpenCode:
     checkpoint_root: Path | None = None
     binding: native_evidence.CallBinding | None = None
     candidate_snapshot: Callable[[], str] | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a snapshot callback that cannot retain its receipt."""
+        if self.candidate_snapshot is not None and self.checkpoint_root is None:
+            message = "Candidate snapshots require retained checkpoint state."
+            raise ValueError(message)
+
+    def _retain(self, profile: Path, code: int, output: str) -> bool:
+        """Quarantine retention failures without losing the provider's result."""
+        retained = True
+        try:
+            native_evidence.finish(profile, code, output)
+        except OSError:
+            retained = False
+        if self.candidate_snapshot is None:
+            return retained
+        try:
+            candidate = self.candidate_snapshot()
+        except Exception:  # noqa: BLE001 - a callback failure cannot discard usage/history
+            candidate = None
+            retained = False
+        try:
+            native_evidence.finish_candidate(profile, candidate)
+        except OSError:
+            retained = False
+        return retained
 
     def config(self, *, read_only: bool, steps: int) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads."""
@@ -179,14 +204,7 @@ class MiMoOpenCode:
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
             if self.checkpoint_root is not None:
-                native_evidence.finish(evidence, code, stdout)
-                if self.candidate_snapshot is not None:
-                    try:
-                        candidate = self.candidate_snapshot()
-                    except (GitError, OSError):
-                        candidate = None
-                        snapshot_failed = True
-                    native_evidence.finish_candidate(evidence, candidate)
+                snapshot_failed = not self._retain(evidence, code, stdout)
         text, usage, failed = events(stdout)
         result = provider_result(
             self.name,

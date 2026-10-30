@@ -173,13 +173,29 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
 
 
 @pytest.mark.parametrize("exit_code", [0, 124, 429])
+@pytest.mark.parametrize("failure", ["callback", "unexpected", "receipt", "native"])
 def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
     tmp_path: Path,
     exit_code: int,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def snapshot() -> str:
         message = "private error details"
-        raise GitError(message)
+        if failure == "callback":
+            raise GitError(message)
+        if failure == "unexpected":
+            raise RuntimeError(message)
+        return sha256("candidate")
+
+    def storage_failure(*_args: object) -> None:
+        message = "storage unavailable"
+        raise OSError(message)
+
+    if failure == "receipt":
+        monkeypatch.setattr(native_evidence, "finish_candidate", storage_failure)
+    if failure == "native":
+        monkeypatch.setattr(native_evidence, "finish", storage_failure)
 
     def runner(
         _argv: list[str],
@@ -212,8 +228,27 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
         "timed_out" if exit_code == 124 else "candidate_unavailable"
     )
     profile = next((tmp_path / "checkpoints").iterdir())
-    receipt = json.loads((profile / "candidate.json").read_text())
-    assert receipt["status"] == "unavailable"
-    assert receipt["patch_sha256"] is None
-    assert "private error details" not in json.dumps(receipt)
-    assert json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
+    if failure == "receipt":
+        assert not (profile / "candidate.json").exists()
+    else:
+        receipt = json.loads((profile / "candidate.json").read_text())
+        assert receipt["status"] == (
+            "captured" if failure == "native" else "unavailable"
+        )
+        assert receipt["patch_sha256"] == (
+            sha256("candidate") if failure == "native" else None
+        )
+        assert "private error details" not in json.dumps(receipt)
+    if failure == "native":
+        assert not (profile / "result.json").exists()
+    else:
+        assert (
+            json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
+        )
+
+
+def test_snapshot_without_retained_state_is_refused() -> None:
+    with pytest.raises(ValueError, match="retained checkpoint state"):
+        MiMoOpenCode(
+            SecretStr("test-only"), candidate_snapshot=lambda: sha256("candidate")
+        )

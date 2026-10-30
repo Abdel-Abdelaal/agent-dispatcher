@@ -85,6 +85,7 @@ REPAIR_CI_PLAN = "Fix the failing CI check shown in the log, and nothing else."
 MAX_REVIEWS = 2
 _TITLE_LIMIT = 72
 _STOP_REASONS = {
+    "candidate_unavailable": " (the final candidate evidence could not be retained)",
     "max_turns": " (it ran out of turns even at the hard level)",
     "timed_out": " (it hit the 20-minute limit for one call)",
 }

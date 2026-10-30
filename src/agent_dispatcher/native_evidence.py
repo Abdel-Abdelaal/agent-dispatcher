@@ -63,6 +63,7 @@ _CATEGORIES = {
         "cycle_abandoned",
         "controller_cancelled",
         "controller_failed",
+        "candidate_unavailable",
     },
     "harness": {"opencode", "claude-code", "codex-cli", "chat-api", "cycle-supervisor"},
 }

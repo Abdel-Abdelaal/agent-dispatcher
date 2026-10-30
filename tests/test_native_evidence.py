@@ -44,6 +44,10 @@ def test_final_candidate_receipt_cannot_overwrite_an_existing_one(
     with pytest.raises(FileExistsError):
         native_evidence.finish_candidate(tmp_path, "b" * 64)
     assert (tmp_path / "candidate.json").read_bytes() == before
+    assert (
+        native_evidence.metrics({"outcome": "candidate_unavailable"})["outcome"]
+        == "candidate_unavailable"
+    )
 
 
 def test_partial_native_state_returns_counters_without_confidential_payloads(

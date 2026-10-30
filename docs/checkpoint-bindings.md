@@ -14,11 +14,14 @@ Every call, including an escalation, receives a fresh binding; the shared provid
 adapter is not mutated. Direct adapter calls without controller context explicitly
 retain `binding: null`. Existing diagnostic profiles remain unbound.
 
-After the native process returns, the controller snapshots the final candidate
-through its trusted Git context. A separate `candidate.json` records that patch
-hash, including when the call timed out after making edits. Snapshot failure marks
-the call failed and the candidate unavailable; the original native result and raw
-events remain intact. A controller killed before this step has no final receipt;
+For checkpointed MiMo/OpenCode calls, after the native process returns the
+controller snapshots the final candidate through its trusted Git context.
+A separate `candidate.json` records that patch hash, including when the call timed
+out after making edits. Snapshot or receipt-write failure prevents success;
+existing quota exhaustion still parks the task and existing timeouts remain
+timeouts. Provider usage and the original result are preserved when storage
+permits; a disk failure can leave missing or partial evidence files. A controller
+killed before this step has no final receipt;
 interruption during receipt writing may leave an incomplete file.
 Direct adapter calls without a controller snapshot callback do not produce it.
 The hash covers the publishable Git patch, not every ignored file or other piece

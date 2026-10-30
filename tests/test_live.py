@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import override
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -249,11 +250,16 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
     assert bound().run_id != before.run_id
 
 
-@pytest.mark.parametrize("exit_code", [0, 124])
+@pytest.mark.parametrize(
+    ("exit_code", "snapshot_failure"), [(0, False), (124, False), (0, True)]
+)
 def test_controller_call_retains_binding_before_native_process_starts(
     tmp_path: Path,
     origin: Path,
     exit_code: int,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    snapshot_failure: bool,
 ) -> None:
     run = team_run(tmp_path, origin, models([], []), FakeGh())
     root = tmp_path / "checkpoints"
@@ -274,6 +280,10 @@ def test_controller_call_retains_binding_before_native_process_starts(
         )
         assert (profile / "config.sha256").exists()
         (_cwd / "candidate.txt").write_text("partial work")
+        if snapshot_failure:
+            monkeypatch.setattr(
+                run.workspace, "patch", Mock(side_effect=GitError("snapshot refused"))
+            )
         return exit_code, json.dumps({"type": "text", "part": {"text": "done"}}), ""
 
     class Native(MiMoOpenCode):
@@ -312,8 +322,9 @@ def test_controller_call_retains_binding_before_native_process_starts(
             kind="implement",
         )
 
-    if exit_code:
-        with pytest.raises(Stop, match="failed while"):
+    if exit_code or snapshot_failure:
+        message = "final candidate evidence" if snapshot_failure else "failed while"
+        with pytest.raises(Stop, match=message):
             call()
     else:
         assert call() == "done"
@@ -321,9 +332,13 @@ def test_controller_call_retains_binding_before_native_process_starts(
     profile = next(root.iterdir())
     candidate = json.loads((profile / "candidate.json").read_text())
     initial = json.loads((profile / "metadata.json").read_text())["binding"]
-    assert candidate["status"] == "captured"
-    assert candidate["patch_sha256"] == sha256(run.workspace.patch(clone))
-    assert candidate["patch_sha256"] != initial["patch_sha256"]
+    if snapshot_failure:
+        assert candidate["status"] == "unavailable"
+        assert candidate["patch_sha256"] is None
+    else:
+        assert candidate["status"] == "captured"
+        assert candidate["patch_sha256"] == sha256(run.workspace.patch(clone))
+        assert candidate["patch_sha256"] != initial["patch_sha256"]
     assert json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
 
 
