@@ -112,29 +112,29 @@ our authorization/publication boundaries preserved.
 
 ## First implementation priorities
 
-1. Give the worker verifiable feedback before publication. The controller should
-   request approved lint/type/test profiles in a disposable environment with no
-   model, GitHub or App credentials. Bind results to the exact base and patch;
-   an old green result cannot authorize a changed candidate. Environment-variable
-   scrubbing alone is not a sandbox against code reading host credential files.
-2. Treat recovery as a protocol. Bind a checkpoint to task authorization, source,
-   candidate, stage, tool policy and runtime version. Fork private state, retain
-   the failed attempt, refuse stale or ambiguous state and check again before
-   publishing. The [frozen contract](evaluation-2026-10-30/continuation-acceptance.json)
-   has 11 cases. Current completed-session transport does not satisfy the
-   interrupted-reasoning requirement.
-3. Separate policy from compactable notes. Reinsert authoritative constraints and
-   references through the controller. Record completed work, unresolved questions
-   and next actions as data; a model's notes cannot grant privileges or certify tests.
-4. Add independent correctness evidence. Use baseline regression tests, hidden
-   acceptance cases, properties and negative controls alongside native coverage.
-   Review test weakening and unrelated edits. For stronger adversarial assurance,
-   keep the test driver separate from the process executing candidate code.
-5. Improve observability without overstating trust. Record effective settings,
-   stage outcomes, unknown counters and parent relationships. Existing signatures
-   attest ingestion, not independent local execution. Investigate incremental
-   verification keyed by content and trust-policy version; a shared D1 schema
-   needs inspection and coordination before any changes.
+- Give the worker verifiable feedback before publication. The controller should
+  request approved lint/type/test profiles in a disposable environment with no
+  model, GitHub or App credentials. Bind results to the exact base and patch;
+  an old green result cannot authorize a changed candidate. Environment-variable
+  scrubbing alone is not a sandbox against code reading host credential files.
+- Treat recovery as a protocol. Bind a checkpoint to task authorization, source,
+  candidate, stage, tool policy and runtime version. Fork private state, retain
+  the failed attempt, refuse stale or ambiguous state and check again before
+  publishing. The [frozen contract](evaluation-2026-10-30/continuation-acceptance.json)
+  has 11 cases. Current completed-session transport does not satisfy the
+  interrupted-reasoning requirement.
+- Separate policy from compactable notes. Reinsert authoritative constraints and
+  references through the controller. Record completed work, unresolved questions
+  and next actions as data; a model's notes cannot grant privileges or certify tests.
+- Add independent correctness evidence. Use baseline regression tests, hidden
+  acceptance cases, properties and negative controls alongside native coverage.
+  Review test weakening and unrelated edits. For stronger adversarial assurance,
+  keep the test driver separate from the process executing candidate code.
+- Improve observability without overstating trust. Record effective settings,
+  stage outcomes, unknown counters and parent relationships. Existing signatures
+  attest ingestion, not independent local execution. Investigate incremental
+  verification keyed by content and trust-policy version; a shared D1 schema
+  needs inspection and coordination before any changes.
 
 ## Experiments and claim threshold
 
