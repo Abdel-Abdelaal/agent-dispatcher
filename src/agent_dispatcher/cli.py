@@ -86,7 +86,8 @@ def describe(plan: Plan, *, dry_run: bool) -> str:
     """Return a short, human-readable account of a cycle."""
     lines = [f"queued: {issue.repo}#{issue.number}" for issue in plan.queued]
     lines += [
-        f"ignored (task lacks one open, owner-authorized ready state): {issue.repo}#{issue.number}"
+        "ignored (task lacks one open, owner-authorized ready state): "
+        f"{issue.repo}#{issue.number}"
         for issue in plan.ignored
     ]
     if plan.next_task is None:
