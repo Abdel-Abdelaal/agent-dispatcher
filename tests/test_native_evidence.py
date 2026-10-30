@@ -36,6 +36,31 @@ def native_db(profile: Path) -> None:
         db.executemany("INSERT INTO part VALUES(?)", [(json.dumps(x),) for x in parts])
 
 
+@pytest.mark.parametrize(
+    ("errors", "expected"),
+    [
+        ([], []),
+        (
+            ["snapshot_git_error", "confidential-payload", ["private"]],
+            ["snapshot_git_error", "other", "other"],
+        ),
+        ("confidential-payload", None),
+        (None, None),
+    ],
+)
+def test_retention_categories_never_expose_untrusted_payloads(
+    errors: object,
+    expected: list[str] | None,
+) -> None:
+    result = native_evidence.metrics({"retention_errors": errors})
+    if expected is None:
+        assert "retention_errors" not in result
+    else:
+        assert result["retention_errors"] == expected
+    assert "confidential-payload" not in json.dumps(result)
+    assert "private" not in json.dumps(result)
+
+
 def test_final_candidate_receipt_cannot_overwrite_an_existing_one(
     tmp_path: Path,
 ) -> None:

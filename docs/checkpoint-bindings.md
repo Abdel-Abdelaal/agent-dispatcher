@@ -17,7 +17,7 @@ retain `binding: null`. Existing diagnostic profiles remain unbound.
 For checkpointed MiMo/OpenCode calls, after the native process returns the
 controller snapshots the final candidate through its trusted Git context.
 A separate `candidate.json` records that patch hash, including when the call timed
-out after making edits. Snapshot or receipt-write failure prevents success;
+out after making edits. Native-evidence, snapshot or receipt-write failure prevents success;
 existing quota exhaustion still parks the task and existing timeouts remain
 timeouts. Usage remains on the returned result; the original native exit code and
 events remain in evidence files when storage permits. The result returned to the
@@ -33,6 +33,9 @@ check or an operating-system sandbox.
 
 These are **state receipts, not resumable checkpoints**. No continuation
 command, automatic restart or publication authorization is enabled by them.
+The existing evidence command reports retention categories from telemetry; it
+does not yet inspect the raw final-candidate receipt. A separately reviewed
+continuation consumer must validate that receipt before using it.
 Safe continuation still requires native session and version validation, path and
 policy checks, fresh task authorization, an owned
 cycle lease and preservation of all failure, usage and quota history. A receipt

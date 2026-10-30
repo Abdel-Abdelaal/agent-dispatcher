@@ -264,6 +264,7 @@ def test_controller_call_retains_binding_before_native_process_starts(
 ) -> None:
     run = team_run(tmp_path, origin, models([], []), FakeGh())
     root = tmp_path / "checkpoints"
+    run.telemetry = Telemetry(tmp_path / "telemetry")
 
     def runner(
         _argv: list[str],
@@ -350,6 +351,11 @@ def test_controller_call_retains_binding_before_native_process_starts(
         assert candidate["patch_sha256"] == sha256(run.workspace.patch(clone))
         assert candidate["patch_sha256"] != initial["patch_sha256"]
     assert json.loads((profile / "result.json").read_text())["exit_code"] == exit_code
+    record = json.loads(next((tmp_path / "telemetry").glob("*.jsonl")).read_text())
+    assert record["retention_errors"] == (
+        ["snapshot_git_error"] if snapshot_failure else []
+    )
+    assert record["exit_code"] == (exit_code or int(snapshot_failure))
 
 
 def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> None:
