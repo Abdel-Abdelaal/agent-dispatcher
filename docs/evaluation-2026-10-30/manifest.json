@@ -9,10 +9,11 @@
     "output-budget-wire.json": "191215203f7ace52847e3eb8a69257c3fbb034d59b765964fa578ff45612d71e",
     "fixture-assumption-error.json": "f6e8ceefdcc76fe2ac9aa8b6b4e767510f36c9558719519239feee270574d44b",
     "continuation-acceptance.json": "e2acdb4e84e1b86579e23978958730a3678271c3c3e135e880f4f29a4a1279f1",
-    "experiment-plan.json": "5ec6eee313061b630609ef0dd45f526a589b7f161e691cde88ad9ad59d759584"
+    "experiment-plan.json": "5ec6eee313061b630609ef0dd45f526a589b7f161e691cde88ad9ad59d759584",
+    "interrupted-reasoning-shapes.json": "4b459510613cac92936d9fb323212de4b21f6b438ab354c55501bf722a5dc4cb"
   },
   "privacy": "No real prompts, private reasoning, real tool payloads, session databases or credentials published.",
   "limitations": "Original source scripts are retained locally with hashes in signed telemetry; these summaries are not an independently reproduced public benchmark. The first fixture assumption error is retained.",
   "budget_note": "The 32768 declaration case matches the platform analysis declaration. The native helper currently declares 32000; both are capped at 32000 without a global override.",
-  "hash_scope": "Hashes cover committed Git blob bytes (LF line endings). Local original source/result hashes remain separately bound in telemetry."
+  "hash_scope": "SHA-256 of published UTF-8 content bytes with LF line endings, excluding any Git blob header; see README.md and tests/test_research_evidence.py. Local original hashes are separately bound in telemetry."
 }

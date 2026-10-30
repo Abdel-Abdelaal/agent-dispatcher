@@ -21,6 +21,10 @@ our observations and proposed engineering. It supplements the earlier
 initial evaluator mistake about parent-session metadata. A corrected test checks
 actual content preservation. Failed fixtures remain visible. No live model was
 called for these local protocol experiments. Raw real reasoning stays private.
+[Evidence interpretation](evaluation-2026-10-30/README.md) identifies each
+procedure and the exact hash inputs. A separate repetition confirms that the
+replayed reasoning key exists with an empty string; original summaries are
+retained unchanged.
 
 Xiaomi's [model specification](https://mimo.mi.com/models/en-US/mimo-v2.6-flash)
 advertises 1M context and 128K output. Our current native helper uses operational
