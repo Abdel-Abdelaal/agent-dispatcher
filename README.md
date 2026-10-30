@@ -172,6 +172,16 @@ exhausted provider gets `agent:parked` and is retried after `DISPATCHER_PARK_HOU
 
 The agent never pushes or holds a GitHub token. It can write anything in its own
 clone, `.git/hooks` and `.git/config` included, so nothing is pushed from there.
+Patch extraction also ignores its Git config, HEAD and index: the controller
+keeps an independent metadata copy before handing over the clone and uses that
+copy with an isolated index and an environment without credentials. Clean/smudge
+filters are disabled before checkout and remain disabled during extraction and
+publication. This prevents a candidate from executing configured filters or
+hiding edits by committing them locally. Only clones registered by the controller
+can be inspected this way. Filter-dependent checkouts such as Git LFS are not
+materialized by this lane; dedicated support requires separate validation.
+The metadata copy is a prerequisite for future recovery, not an enabled automatic
+conversation-resume mechanism. Existing diff gates and protected paths still apply.
 Claude runs with `--setting-sources local`. That ignores user settings (which may
 point Claude Code at another provider) and the repository's own
 `.claude/settings.json`, whose hooks would otherwise run. Until the agent runs in
