@@ -70,7 +70,9 @@ try {
     }
     $path = Join-Path $repo '.env'
     $content = [IO.File]::ReadAllText($path)
-    if ($content -notmatch '(?m)^DISPATCHER_MIMO_API_KEY\s*=\s*\S+') {
+    # Spaces and tabs only: \s would cross a line break, so an empty key followed
+    # by any next line would pass.
+    if ($content -notmatch '(?m)^DISPATCHER_MIMO_API_KEY[ \t]*=[ \t]*\S') {
         throw 'MiMo credentials are not configured in the existing local .env.'
     }
     $settings = [ordered]@{
