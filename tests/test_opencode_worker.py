@@ -69,6 +69,37 @@ def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
         assert "test-only" not in json.dumps(config)
 
 
+def stepped(count: int, reply: str) -> str:
+    finish = json.dumps({"type": "step_finish", "part": {"tokens": {"input": 1}}})
+    return "\n".join(
+        [finish] * count + [json.dumps({"type": "text", "part": {"text": reply}})]
+    )
+
+
+@pytest.mark.parametrize(("steps", "capped"), [(4, False), (5, True), (6, True)])
+def test_reaching_the_step_cap_is_reported_like_claude_codes(
+    tmp_path: Path, steps: int, *, capped: bool
+) -> None:
+    # runs 36-39: OpenCode exits 0 at its cap after a forced summary, so the
+    # controller never knew a worker stopped early or a review lost its verdict.
+    def runner(
+        argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
+    ) -> tuple[int, str, str]:
+        del argv, cwd, stdin, env
+        return 0, stepped(steps, "summary so far"), ""
+
+    result = OpenCodeWorker(SecretStr("test-only")).run(
+        "task", tmp_path, max_turns=5, runner=runner, environ={}
+    )
+    assert result.text == "summary so far"
+    assert result.usage == {"input_tokens": steps}
+    if capped:
+        assert (result.exit_code, result.stop_reason) == (1, "max_turns")
+    else:
+        assert (result.exit_code, result.stop_reason) == (0, "")
+    assert not result.exhausted
+
+
 def test_run_isolates_config_state_and_prompt_then_cleans_it(tmp_path: Path) -> None:
     captured: list[Path] = []
 

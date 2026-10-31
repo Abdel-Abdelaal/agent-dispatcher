@@ -166,8 +166,15 @@ hook and lint checks, when no task is waiting. A second failure needs
 investigation rather than an unlimited retry loop. Do not weaken tests or protections to get a green result.
 
 An invalid review verdict gets one formatting retry by the read-only reviewer.
-It never authorizes a code edit or counts as approval. Two invalid replies stop
-the task without publishing a PR.
+It never authorizes a code edit or counts as approval. The retry gets the first
+reply as notes and three steps to turn them into a verdict, not a fresh review;
+unfinished notes must give `approve: false`. Two invalid replies stop the task
+without publishing a PR.
+
+Every call is told its step cap. OpenCode, like Claude Code, now reports reaching
+it: a worker continues at the next level in the same clone and is told its edits
+are already there, and a planner's or reviewer's final reply at the cap goes to
+the usual plan and verdict checks. A read-only call that ends with no reply stops.
 
 The fleet shares reusable checks, with additional checks appropriate to each
 repository. Shortlink's application checks and PR-Agent trial are not universal.

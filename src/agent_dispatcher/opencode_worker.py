@@ -61,6 +61,20 @@ def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
     return text, usage or None, failed
 
 
+def steps_taken(output: str) -> int:
+    """Count the model steps OpenCode finished, from its JSON event stream."""
+    count = 0
+    for line in output.splitlines():
+        try:
+            value: Any = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            data = cast("dict[str, Any]", value)
+            count += data.get("type") == "step_finish"
+    return count
+
+
 @dataclass(frozen=True)
 class OpenCodeWorker:
     """One model behind the same controller gates, explicit limits, ephemeral state.
@@ -286,6 +300,11 @@ class OpenCodeWorker:
             tuning=Tuning(self.model, ""),
             usage=usage,
         )
+        if result.exit_code == 0 and steps_taken(stdout) >= steps:
+            # OpenCode exits normally at its cap, after making the model summarise
+            # without tools. Say so, as Claude Code does, so the controller can
+            # continue a worker and knows a final reply may be incomplete.
+            result = replace(result, exit_code=1, stop_reason="max_turns")
         return (
             replace(
                 result,
