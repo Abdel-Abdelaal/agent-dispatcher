@@ -187,9 +187,11 @@ def resume_args(
     )
 
 
-def main() -> int:
+CHECKOUT = Path(__file__).resolve().parents[2]
+
+
+def main(root: Path = CHECKOUT) -> int:
     """Open the real TUI, resuming local sessions without a custom chat loop."""
-    root = Path(__file__).resolve().parents[2]
     settings = load_settings(root / ".env")
     if not settings.mimo_api_key:
         sys.stderr.write("MiMo is not configured. No provider was started.\n")
