@@ -22,7 +22,7 @@ from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.levels import DEFAULT_LADDER, Level
-from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.opencode_worker import OpenCodeWorker
 from agent_dispatcher.providers import (
     ClaudeCli,
     Runner,
@@ -219,7 +219,7 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
     origin: Path,
 ) -> None:
     run = team_run(tmp_path, origin, models([], []), FakeGh())
-    adapter = MiMoOpenCode(
+    adapter = OpenCodeWorker(
         SecretStr("test-only"), checkpoint_root=tmp_path / "checkpoints"
     )
     run.providers = {"mimo": adapter}
@@ -227,7 +227,7 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
 
     def bound() -> native_evidence.CallBinding:
         result = run._bound_provider("mimo", "implement", clone)  # pyright: ignore[reportPrivateUsage]
-        assert isinstance(result, MiMoOpenCode)
+        assert isinstance(result, OpenCodeWorker)
         assert result.binding is not None
         return result.binding
 
@@ -244,7 +244,7 @@ def test_native_call_identity_changes_with_task_candidate_stage_and_policy(
     run.limits = replace(run.limits, allow_test_deletions=True)
     assert bound().policy_sha256 != before.policy_sha256
     other_stage = run._bound_provider("mimo", "review", clone)  # pyright: ignore[reportPrivateUsage]
-    assert isinstance(other_stage, MiMoOpenCode)
+    assert isinstance(other_stage, OpenCodeWorker)
     assert other_stage.binding is not None
     assert other_stage.binding.stage == "review"
     run.run_id += 1
@@ -293,7 +293,7 @@ def test_controller_call_retains_binding_before_native_process_starts(
             ("quota exhausted" if exit_code == 429 else ""),
         )
 
-    class Native(MiMoOpenCode):
+    class Native(OpenCodeWorker):
         @override
         def run(
             self,

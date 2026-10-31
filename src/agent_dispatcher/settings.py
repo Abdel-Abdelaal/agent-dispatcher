@@ -3,8 +3,16 @@
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from pydantic import AfterValidator, BeforeValidator, Field, SecretStr
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SecretStr,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from agent_dispatcher.levels import DEFAULT_LADDER
@@ -38,6 +46,57 @@ def _absolute(path: Path | None) -> Path | None:
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
+BUILT_IN_PROVIDERS = ("claude", "codex", "mimo", "nvidia")
+_LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _not_built_in(name: str) -> str:
+    """Keep built-in names unambiguous in labels, parking and telemetry."""
+    if name in BUILT_IN_PROVIDERS:
+        message = f"{name} is a built-in provider"
+        raise ValueError(message)
+    return name
+
+
+def _encrypted_unless_local(url: str) -> str:
+    """Refuse to send a key or code over plain HTTP, except to this machine."""
+    parsed = urlsplit(url)
+    local = parsed.scheme == "http" and parsed.hostname in _LOCAL_HOSTS
+    if not parsed.hostname or not (parsed.scheme == "https" or local):
+        message = "base_url must be https, or http to localhost, 127.0.0.1 or ::1"
+        raise ValueError(message)
+    return url.rstrip("/")
+
+
+class ExtraProvider(BaseModel):
+    """Any OpenAI-compatible endpoint, driven through the same OpenCode harness.
+
+    OpenRouter, Groq, DeepSeek, a local Ollama or LM Studio server, or a LiteLLM
+    proxy in front of anything else: no adapter code, only this entry.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: Annotated[
+        str, Field(pattern=r"^[a-z][a-z0-9-]{1,30}$"), AfterValidator(_not_built_in)
+    ]
+    base_url: Annotated[str, AfterValidator(_encrypted_unless_local)]
+    model: str = Field(min_length=1)
+    # A local server ignores it, but OpenCode still sends one: any value works.
+    api_key: SecretStr
+    # Workers implement; a thinker may also plan and review.
+    role: Literal["worker", "thinker"] = "worker"
+    # OpenCode compacts the conversation against these, so give the real limits.
+    context: int = Field(default=128_000, gt=0)
+    output: int = Field(default=16_000, gt=0)
+
+
+def _unique_names(providers: list[ExtraProvider]) -> list[ExtraProvider]:
+    names = [provider.name for provider in providers]
+    if len(names) != len(set(names)):
+        message = "extra provider names must be unique"
+        raise ValueError(message)
+    return providers
 
 
 class Settings(BaseSettings):
@@ -93,3 +152,8 @@ class Settings(BaseSettings):
     mimo_reasoning: Literal["enabled", "disabled"] = "enabled"
     opencode_executable: str = "opencode"
     nvidia_api_key: SecretStr | None = None
+    # JSON list of ExtraProvider entries; they come after the built-in providers
+    # of their role, and `disabled_providers` can switch any of them off.
+    extra_providers: Annotated[list[ExtraProvider], AfterValidator(_unique_names)] = (
+        Field(default_factory=list[ExtraProvider])
+    )

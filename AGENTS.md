@@ -29,7 +29,7 @@ One name per concept; use exactly these.
 | --- | --- | --- |
 | task | one owner-labelled issue the controller works on | job, ticket, item |
 | run | one attempt at a task by one provider | session, execution |
-| provider | a model backend: claude, codex, mimo or nvidia | model, engine, backend |
+| provider | a model backend: claude, codex, mimo, nvidia or an extra provider | model, engine, backend |
 | state | the task's `agent:*` label | status, stage |
 | gate | a controller check a run's diff must pass | guard, filter |
 | quota | a provider's remaining allowance and reset time | limit, budget |

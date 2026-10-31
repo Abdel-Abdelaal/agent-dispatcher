@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agent_dispatcher.native_evidence import CallBinding
-from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.opencode_worker import OpenCodeWorker
 from agent_dispatcher.providers import Runner, RunResult, subprocess_runner
 from agent_dispatcher.telemetry import sha256
 
@@ -247,7 +247,7 @@ def fork(root: Path, source: Source, prompt: str) -> Path:
 
 
 def resume(  # noqa: PLR0913 - the controller's checks and the call travel together
-    worker: MiMoOpenCode,
+    worker: OpenCodeWorker,
     prompt: str,
     worktree: Path,
     profile: Path,
