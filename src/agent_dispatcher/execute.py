@@ -164,7 +164,13 @@ def pr_title(issue: Issue) -> str:
         ),
         "chore",
     )
-    subject = subject[:1].lower() + subject[1:]
+    first, _, rest = subject.partition(" ")
+    if any(char.isupper() for char in first[1:]):
+        # Lowercasing "README" or "MiMo" garbles it; code-quoting satisfies the
+        # lowercase-subject rule and keeps the name.
+        subject = f"`{first}` {rest}".rstrip()
+    else:
+        subject = subject[:1].lower() + subject[1:]
     return f"{kind}: {subject}"[:_TITLE_LIMIT].rstrip()
 
 

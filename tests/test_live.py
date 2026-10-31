@@ -539,6 +539,14 @@ def test_pr_title_is_conventional_and_bounded() -> None:
         ("Add previews", ("enhancement",), "feat: add previews"),
         ("Explain preview", ("documentation",), "docs: explain preview"),
         ("do: strange header", (), "chore: do: strange header"),
+        (
+            "README claims nightly drift",
+            ("documentation",),
+            "docs: `README` claims nightly drift",
+        ),
+        ("MiMo times out", ("bug",), "fix: `MiMo` times out"),
+        ("CI", (), "chore: `CI`"),
+        ("A flaky test", ("bug",), "fix: a flaky test"),
     ],
 )
 def test_pr_title_preserves_valid_intent_without_double_prefix(
