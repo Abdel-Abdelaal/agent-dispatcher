@@ -13,6 +13,8 @@ API = "https://api.github.com"
 _AGENT_BRANCH = re.compile(r"^agent/(?P<issue>\d+)-run-\d+$")
 # Advisory checks never block a merge, so they never trigger a repair either.
 _ADVISORY = ("review / ai",)
+# An Actions check run links to its job; any other link has no log to read.
+_JOB_URL = "https://github.com/{repo}/actions/runs/[0-9]+/job/(?P<job>[0-9]+)"
 _EVENTS_PAGE_SIZE = 100
 
 
@@ -29,7 +31,7 @@ class AgentPr:
 
 @dataclass(frozen=True)
 class FailedCheck:
-    """A finished check that failed, and the Actions job that ran it."""
+    """A finished check that failed, and the Actions job that ran it ("" if none)."""
 
     name: str
     job_id: str
@@ -195,11 +197,14 @@ class GitHubReader:
         # not hold up the repair of a required check that has already failed.
         if any(run["status"] != "completed" for run in runs):
             return None
-        return [
-            FailedCheck(run["name"], str(run.get("details_url", "")).rsplit("/", 1)[-1])
-            for run in runs
-            if run["conclusion"] in {"failure", "timed_out"}
-        ]
+        job = re.compile(_JOB_URL.format(repo=re.escape(repo)))
+        failed: list[FailedCheck] = []
+        for run in runs:
+            if run["conclusion"] not in {"failure", "timed_out"}:
+                continue
+            match = job.fullmatch(str(run.get("details_url") or ""))
+            failed.append(FailedCheck(run["name"], match["job"] if match else ""))
+        return failed
 
     def labelled_by(self, repo: str, number: int) -> str | None:
         """Return who most recently added the ready label, from the issue events."""
