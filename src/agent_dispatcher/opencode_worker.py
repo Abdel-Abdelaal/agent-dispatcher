@@ -155,12 +155,61 @@ class MiMoOpenCode:
     ) -> RunResult:
         """Isolate ambient config; optionally retain private native diagnostic state."""
         del tuning
-        config = self.config(read_only=read_only, steps=max_turns or 15)
+        return self._call(
+            prompt,
+            worktree,
+            read_only=read_only,
+            steps=max_turns or 15,
+            runner=runner,
+            environ=environ,
+        )
+
+    def resume(  # noqa: PLR0913 - the verified fork rides along with the call
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        profile: Path,
+        session: str,
+        steps: int,
+        runner: Runner = subprocess_runner,
+        environ: Mapping[str, str] | None = None,
+    ) -> RunResult:
+        """Continue a forked copy of a verified retained session, read-only.
+
+        Only `continuation.resume` should call this: it checks the source and makes
+        the fork. OpenCode forks the session again inside the copy, so neither the
+        retained original nor the copied original session is changed.
+        """
+        return self._call(
+            prompt,
+            worktree,
+            read_only=True,
+            steps=steps,
+            runner=runner,
+            environ=environ,
+            fork=(profile, session),
+        )
+
+    def _call(  # noqa: PLR0913 - one native call, fresh or continued
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool,
+        steps: int,
+        runner: Runner,
+        environ: Mapping[str, str] | None,
+        fork: tuple[Path, str] | None = None,
+    ) -> RunResult:
+        config = self.config(read_only=read_only, steps=steps)
         retention_errors: tuple[str, ...] = ()
         with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
             root = Path(tmp)
             evidence = root
-            if self.checkpoint_root is not None:
+            if fork is not None:
+                evidence = fork[0]
+            elif self.checkpoint_root is not None:
                 evidence = native_evidence.create(
                     self.checkpoint_root,
                     worktree,
@@ -169,6 +218,7 @@ class MiMoOpenCode:
                     reasoning=self.reasoning,
                     binding=self.binding,
                 )
+            if fork is not None or self.checkpoint_root is not None:
                 (evidence / "config.sha256").write_text(
                     native_evidence.sha256(config),
                     encoding="utf-8",
@@ -200,6 +250,7 @@ class MiMoOpenCode:
                 "json",
                 "--model",
                 f"worker/{MIMO_MODEL}",
+                *(("--session", fork[1], "--fork") if fork is not None else ()),
                 "--file",
                 str(task),
                 "--",
@@ -208,7 +259,7 @@ class MiMoOpenCode:
                 "Finish with the requested answer once the file work is complete.",
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
-            if self.checkpoint_root is not None:
+            if fork is not None or self.checkpoint_root is not None:
                 retention_errors = self._retain(evidence, code, stdout)
         text, usage, failed = events(stdout)
         result = provider_result(
