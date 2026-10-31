@@ -7,7 +7,7 @@ from datetime import datetime
 from agent_dispatcher.intake import Issue, accepts
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.quota import Quota, allows
-from agent_dispatcher.roles import Team, form_team
+from agent_dispatcher.roles import Roster, Team, form_team
 
 
 @dataclass(frozen=True)
@@ -26,11 +26,13 @@ def choose_team(
     now: datetime,
     *,
     allow_worker_thinking: bool = False,
+    roster: Roster = Roster(),  # noqa: B008 - frozen, so one shared default is safe
 ) -> Team | None:
     """Return the team for the next run; providers missing from `quotas` are off."""
     return form_team(
         lambda name: name in quotas and allows(quotas[name], max_share, now),
         allow_worker_thinking=allow_worker_thinking,
+        roster=roster,
     )
 
 
@@ -44,6 +46,7 @@ class Cycle:
     queue: RunQueue
     max_share: float
     allow_worker_thinking: bool = False
+    roster: Roster = Roster()  # noqa: RUF009 - frozen, so one shared default is safe
 
     def plan(self, quotas: Mapping[str, Quota], now: datetime) -> Plan:
         """Poll every repo, queue owner-labelled issues, and pick the next run."""
@@ -62,6 +65,7 @@ class Cycle:
                 self.max_share,
                 now,
                 allow_worker_thinking=self.allow_worker_thinking,
+                roster=self.roster,
             )
             if task
             else None

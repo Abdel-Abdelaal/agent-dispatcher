@@ -26,7 +26,7 @@ from agent_dispatcher.levels import (
     split_rating,
 )
 from agent_dispatcher.native_evidence import CallBinding
-from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.opencode_worker import OpenCodeWorker
 from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
@@ -326,7 +326,7 @@ class Run:
 
     def _bound_provider(self, name: str, kind: str, clone: Path) -> Provider:
         adapter = self.providers[name]
-        if not isinstance(adapter, MiMoOpenCode) or adapter.checkpoint_root is None:
+        if not isinstance(adapter, OpenCodeWorker) or adapter.checkpoint_root is None:
             return adapter
         return replace(
             adapter,

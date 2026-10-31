@@ -79,6 +79,12 @@ one) or for `DISPATCHER_PARK_HOURS`, and the next run forms a team without it.
 Without a thinker the task waits unless the owner enables worker-only thinking
 as described above. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY` is set.
 
+Any other model with an OpenAI-compatible API joins through
+`DISPATCHER_EXTRA_PROVIDERS`, with no code: OpenRouter, Groq, DeepSeek, Gemini, a
+local Ollama or LM Studio server, or a LiteLLM proxy for everything else. Extras
+run through MiMo's locked-down OpenCode harness and come after the built-in
+providers of their role. See [extra providers](docs/extra-providers.md).
+
 | Piece | State |
 | --- | --- |
 | Label state machine, SQLite queue, single-run lock, owner-only intake | built, tested |
@@ -87,6 +93,7 @@ as described above. NVIDIA joins once `DISPATCHER_NVIDIA_API_KEY` is set.
 | Codex (plan, review) on its ChatGPT login | built, tested with fakes |
 | MiMo (triage, implement) through Claude Code | built, harness live-tested |
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
+| Extra providers (any OpenAI-compatible API) through OpenCode | built, tested with fakes |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ### Keeping token use down

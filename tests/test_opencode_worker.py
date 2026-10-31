@@ -9,7 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence, opencode_worker
-from agent_dispatcher.opencode_worker import MiMoOpenCode, events
+from agent_dispatcher.opencode_worker import OpenCodeWorker, events
 from agent_dispatcher.providers import RunResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
@@ -43,7 +43,7 @@ def test_event_parser_keeps_final_reply_and_known_usage() -> None:
 
 
 def test_read_only_and_editing_configs_keep_other_tools_denied() -> None:
-    worker = MiMoOpenCode(SecretStr("test-only"))
+    worker = OpenCodeWorker(SecretStr("test-only"))
     for read_only in (True, False):
         config = json.loads(worker.config(read_only=read_only, steps=7))
         assert config["agent"]["build"]["steps"] == 7
@@ -95,7 +95,7 @@ def test_run_isolates_config_state_and_prompt_then_cleans_it(tmp_path: Path) -> 
         )
         return 0, json.dumps({"type": "text", "part": {"text": "done"}}), ""
 
-    result = MiMoOpenCode(SecretStr("test-only")).run(
+    result = OpenCodeWorker(SecretStr("test-only")).run(
         "untrusted $(command) task",
         tmp_path,
         max_turns=9,
@@ -117,7 +117,7 @@ def test_cli_requires_explicit_alternative_harness_selection() -> None:
         mimo_reasoning="disabled",
     )
     adapter = cli.providers(settings)["mimo"]
-    assert isinstance(adapter, MiMoOpenCode)
+    assert isinstance(adapter, OpenCodeWorker)
     assert adapter.executable == "D:/trusted/opencode.exe"
     assert adapter.checkpoint_root == settings.work_root.resolve() / "checkpoints"
     assert adapter.reasoning == "disabled"
@@ -141,7 +141,7 @@ def test_timeout_retains_private_prompt_and_native_state_but_cleans_cache(
         (data / "opencode.db").write_bytes(b"synthetic native state")
         return 124, "", "timed out"
 
-    worker = MiMoOpenCode(
+    worker = OpenCodeWorker(
         SecretStr("must-not-persist"),
         checkpoint_root=tmp_path / "checkpoints",
         binding=native_evidence.CallBinding(
@@ -218,7 +218,7 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
         )
         return exit_code, output, "quota exhausted" if exit_code == 429 else ""
 
-    worker = MiMoOpenCode(
+    worker = OpenCodeWorker(
         SecretStr("test-only"),
         checkpoint_root=tmp_path / "checkpoints",
         candidate_snapshot=snapshot,
@@ -265,7 +265,7 @@ def test_unavailable_candidate_fails_closed_without_losing_quota_or_usage(
 
 def test_snapshot_without_retained_state_is_refused() -> None:
     with pytest.raises(ValueError, match="retained checkpoint state"):
-        MiMoOpenCode(
+        OpenCodeWorker(
             SecretStr("test-only"), candidate_snapshot=lambda: sha256("candidate")
         )
 
@@ -296,7 +296,7 @@ def test_retention_failure_cannot_request_another_turn_escalation(
     ) -> tuple[int, str, str]:
         return 0, "", ""
 
-    worker = MiMoOpenCode(
+    worker = OpenCodeWorker(
         SecretStr("test-only"),
         checkpoint_root=tmp_path / "checkpoints",
         candidate_snapshot=snapshot,

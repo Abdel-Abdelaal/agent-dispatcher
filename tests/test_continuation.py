@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from agent_dispatcher import continuation, native_evidence
 from agent_dispatcher.continuation import RefusedError
 from agent_dispatcher.native_evidence import CallBinding
-from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.opencode_worker import OpenCodeWorker
 from agent_dispatcher.telemetry import sha256
 
 VERSION = "1.18.35"
@@ -48,8 +48,8 @@ class Recorder:
         return 0, text, ""
 
 
-def worker(root: Path) -> MiMoOpenCode:
-    return MiMoOpenCode(
+def worker(root: Path) -> OpenCodeWorker:
+    return OpenCodeWorker(
         SecretStr("test-only"),
         checkpoint_root=root,
         candidate_snapshot=lambda: "patch",
@@ -416,7 +416,7 @@ def test_stale_continuation_keeps_its_record_but_is_not_current(
 def test_resume_requires_retained_checkpoint_state(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="checkpoint"):
         continuation.resume(
-            MiMoOpenCode(SecretStr("test-only")),
+            OpenCodeWorker(SecretStr("test-only")),
             "continue",
             tmp_path,
             tmp_path,

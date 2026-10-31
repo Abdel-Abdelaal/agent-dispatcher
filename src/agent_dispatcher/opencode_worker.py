@@ -1,4 +1,7 @@
-"""Opt-in MiMo harness comparison using the already pinned OpenCode CLI."""
+"""Any OpenAI-compatible model editing files through the pinned OpenCode CLI.
+
+MiMo was the first; an extra provider is the same harness with its own endpoint.
+"""
 
 import json
 import os
@@ -59,13 +62,20 @@ def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
 
 
 @dataclass(frozen=True)
-class MiMoOpenCode:
-    """Same MiMo model and controller gates, explicit limits and ephemeral state."""
+class OpenCodeWorker:
+    """One model behind the same controller gates, explicit limits, ephemeral state.
+
+    The defaults are MiMo's. `model_settings` replaces MiMo's reasoning and limits
+    for any other model; OpenCode compacts the conversation against its limits.
+    """
 
     api_key: SecretStr
     executable: str = "opencode"
     name: str = "mimo"
     reasoning: Literal["enabled", "disabled"] = "enabled"
+    base_url: str = MIMO_OPENAI
+    model: str = MIMO_MODEL
+    model_settings: Mapping[str, object] | None = None
     checkpoint_root: Path | None = None
     binding: native_evidence.CallBinding | None = None
     candidate_snapshot: Callable[[], str] | None = None
@@ -105,15 +115,15 @@ class MiMoOpenCode:
         config = cast(
             "dict[str, Any]",
             json.loads(
-                OpenCodeCli(self.name, MIMO_OPENAI, MIMO_MODEL, self.api_key).config(
+                OpenCodeCli(self.name, self.base_url, self.model, self.api_key).config(
                     read_only=read_only
                 )
             ),
         )
         config.update(
             enabled_providers=["worker"],
-            model="worker/" + MIMO_MODEL,
-            small_model="worker/" + MIMO_MODEL,
+            model="worker/" + self.model,
+            small_model="worker/" + self.model,
             permission={
                 "*": "deny",
                 "read": {
@@ -135,8 +145,12 @@ class MiMoOpenCode:
             formatter=False,
             compaction={"auto": True, "prune": True},
         )
-        model = config["provider"]["worker"]["models"][MIMO_MODEL]
-        model.update(mimo_native_model(self.reasoning))
+        model = config["provider"]["worker"]["models"][self.model]
+        model.update(
+            mimo_native_model(self.reasoning)
+            if self.model_settings is None
+            else self.model_settings
+        )
         # Explicitly override built-in agent defaults as well as global policy.
         # Otherwise a built-in permission (for example questions) can take precedence.
         config["agent"]["build"]["permission"] = config["permission"]
@@ -204,7 +218,7 @@ class MiMoOpenCode:
     ) -> RunResult:
         config = self.config(read_only=read_only, steps=steps)
         retention_errors: tuple[str, ...] = ()
-        with tempfile.TemporaryDirectory(prefix="mimo-opencode-") as tmp:
+        with tempfile.TemporaryDirectory(prefix=f"{self.name}-opencode-") as tmp:
             root = Path(tmp)
             evidence = root
             if fork is not None:
@@ -249,7 +263,7 @@ class MiMoOpenCode:
                 "--format",
                 "json",
                 "--model",
-                f"worker/{MIMO_MODEL}",
+                f"worker/{self.model}",
                 *(("--session", fork[1], "--fork") if fork is not None else ()),
                 "--file",
                 str(task),
@@ -269,7 +283,7 @@ class MiMoOpenCode:
             text,
             stderr or stdout,
             harness="opencode",
-            tuning=Tuning(MIMO_MODEL, ""),
+            tuning=Tuning(self.model, ""),
             usage=usage,
         )
         return (

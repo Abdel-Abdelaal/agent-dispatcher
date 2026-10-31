@@ -18,7 +18,7 @@ from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import GitHubReader
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.native_evidence import report as evidence_report
-from agent_dispatcher.opencode_worker import MiMoOpenCode
+from agent_dispatcher.opencode_worker import OpenCodeWorker
 from agent_dispatcher.providers import (
     ChatApi,
     ClaudeCli,
@@ -33,8 +33,8 @@ from agent_dispatcher.providers import (
 from agent_dispatcher.publish import GitHubWriter, PublishError
 from agent_dispatcher.queue import RunQueue, RunRecord, Task
 from agent_dispatcher.quota import Quota
-from agent_dispatcher.roles import Team
-from agent_dispatcher.settings import Settings
+from agent_dispatcher.roles import THINKERS, WORKERS, Roster, Team
+from agent_dispatcher.settings import BUILT_IN_PROVIDERS, Settings
 from agent_dispatcher.states import State, state_of
 from agent_dispatcher.supervisor import cycle as supervised_cycle
 from agent_dispatcher.telemetry import (
@@ -63,7 +63,17 @@ def configured(settings: Settings) -> list[str]:
     names = ["claude", "codex"]
     names += ["mimo"] if settings.mimo_api_key else []
     names += ["nvidia"] if settings.nvidia_api_key else []
+    names += [extra.name for extra in settings.extra_providers]
     return [name for name in names if name not in settings.disabled_providers]
+
+
+def roster(settings: Settings) -> Roster:
+    """Return who can think and who can work: built-in providers first, then extras."""
+    extras = settings.extra_providers
+    return Roster(
+        thinkers=THINKERS + tuple(e.name for e in extras if e.role == "thinker"),
+        workers=WORKERS + tuple(e.name for e in extras if e.role == "worker"),
+    )
 
 
 def quotas(names: Sequence[str], parked: dict[str, datetime]) -> dict[str, Quota]:
@@ -117,7 +127,7 @@ def providers(settings: Settings) -> dict[str, Provider]:
     }
     if settings.mimo_api_key and "mimo" not in settings.disabled_providers:
         adapters["mimo"] = (
-            MiMoOpenCode(
+            OpenCodeWorker(
                 settings.mimo_api_key,
                 settings.opencode_executable,
                 reasoning=settings.mimo_reasoning,
@@ -128,6 +138,19 @@ def providers(settings: Settings) -> dict[str, Provider]:
         )
     if settings.nvidia_api_key:
         adapters["nvidia"] = nvidia_worker(settings.nvidia_api_key)
+    for extra in settings.extra_providers:
+        adapters[extra.name] = OpenCodeWorker(
+            extra.api_key,
+            settings.opencode_executable,
+            name=extra.name,
+            base_url=extra.base_url,
+            model=extra.model,
+            model_settings={
+                "name": extra.model,
+                "limit": {"context": extra.context, "output": extra.output},
+            },
+            checkpoint_root=settings.work_root.resolve() / "checkpoints",
+        )
     return {
         name: adapter
         for name, adapter in adapters.items()
@@ -173,6 +196,7 @@ def held_secrets(settings: Settings) -> list[str]:
         settings.claude_oauth_token,
         settings.mimo_api_key,
         settings.nvidia_api_key,
+        *(extra.api_key for extra in settings.extra_providers),
     ]
     return [secret.get_secret_value() for secret in held if secret]
 
@@ -194,7 +218,8 @@ def record_routing(
     """Record every provider the team left out, and why, before the run starts."""
     parked = queue.parked_until()
     sink = telemetry(settings)
-    for name in ("claude", "codex", "mimo", "nvidia"):
+    every = (*BUILT_IN_PROVIDERS, *(extra.name for extra in settings.extra_providers))
+    for name in every:
         if name in team.members():
             continue
         configured_now = name in configured(settings)
@@ -313,6 +338,7 @@ def repair_next(
         settings.max_weekly_share,
         now,
         allow_worker_thinking=settings.allow_worker_thinking,
+        roster=roster(settings),
     )
     if team is None:
         return None
@@ -480,6 +506,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 queue=queue,
                 max_share=settings.max_weekly_share,
                 allow_worker_thinking=settings.allow_worker_thinking,
+                roster=roster(settings),
             )
             known = quotas(configured(settings), queue.parked_until())
             plan = cycle.plan(known, datetime.now(UTC))
