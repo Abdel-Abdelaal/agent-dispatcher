@@ -1345,26 +1345,48 @@ def test_required_checks_come_from_the_ruleset() -> None:
     assert GitHubReader(rules_client(404, [])).required_checks("o/r", "main") == set()
 
 
-def test_only_required_failures_are_repaired() -> None:
+def test_required_then_shared_hook_and_lint_failures_are_repaired() -> None:
+    # github-governance#50: hooks and lint failed on an agent PR that every
+    # required check passed, and nothing repaired them.
+    def failure(name: str, job: int) -> dict[str, object]:
+        return {
+            "name": name,
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": f"https://github.com/o/r/actions/runs/5/job/{job}",
+        }
+
     done = [
+        failure("lint / Lint (all languages)", 2),
+        failure("hooks / Hooks", 3),
+        failure("Analyze (python)", 4),
+        failure("ci / Test", 1),
+    ]
+    reader = GitHubReader(pulls_client(done))
+    assert reader.failed_checks("o/r", "abc", {"ci / Test"}) == [
+        FailedCheck("ci / Test", "1"),
+        FailedCheck("lint / Lint (all languages)", "2"),
+        FailedCheck("hooks / Hooks", "3"),
+    ]
+    # An unreadable ruleset requires nothing; only the shared checks remain.
+    assert reader.failed_checks("o/r", "abc", set()) == [
+        FailedCheck("lint / Lint (all languages)", "2"),
+        FailedCheck("hooks / Hooks", "3"),
+    ]
+
+
+def test_repair_waits_for_a_running_lint_check() -> None:
+    runs = [
         {
             "name": "ci / Test",
             "status": "completed",
             "conclusion": "failure",
             "details_url": "https://github.com/o/r/actions/runs/5/job/1",
         },
-        {
-            "name": "lint / Lint (all languages)",
-            "status": "completed",
-            "conclusion": "failure",
-            "details_url": "https://github.com/o/r/actions/runs/5/job/2",
-        },
+        {"name": "lint / Lint (all languages)", "status": "in_progress"},
     ]
-    reader = GitHubReader(pulls_client(done))
-    assert reader.failed_checks("o/r", "abc", {"ci / Test"}) == [
-        FailedCheck("ci / Test", "1")
-    ]
-    assert reader.failed_checks("o/r", "abc", set()) == []
+    reader = GitHubReader(pulls_client(runs))
+    assert reader.failed_checks("o/r", "abc", {"ci / Test"}) is None
 
 
 class Crashing(FakeModel):

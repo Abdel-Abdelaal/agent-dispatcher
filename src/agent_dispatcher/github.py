@@ -13,6 +13,9 @@ API = "https://api.github.com"
 _AGENT_BRANCH = re.compile(r"^agent/(?P<issue>\d+)-run-\d+$")
 # Advisory checks never block a merge, so they never trigger a repair either.
 _ADVISORY = ("review / ai",)
+# The fleet's shared hook and lint callers. Few rulesets require them, but a PR
+# that fails them still needs a fix before merge, and the fix is in its files.
+_QUALITY = frozenset({"hooks / Hooks", "lint / Lint (all languages)"})
 # An Actions check run links to its job; any other link has no log to read.
 _JOB_URL = "https://github.com/{repo}/actions/runs/[0-9]+/job/(?P<job>[0-9]+)"
 _EVENTS_PAGE_SIZE = 100
@@ -177,8 +180,9 @@ class GitHubReader:
     ) -> list[FailedCheck] | None:
         """Return failed blocking checks, or None while any check still runs.
 
-        With `required`, only those checks count: a failing advisory or optional
-        check is never worth a repair, and an unreadable ruleset means no repair.
+        With `required`, only those checks and the shared hook and lint checks
+        count, required ones first: a failing advisory or other optional check is
+        never worth a repair, and an unreadable ruleset leaves only hook and lint.
         """
         response = self._client.get(
             f"{API}/repos/{repo}/commits/{sha}/check-runs",
@@ -191,8 +195,10 @@ class GitHubReader:
             run
             for run in response.json()["check_runs"]
             if not run["name"].startswith(_ADVISORY)
-            and (required is None or run["name"] in required)
+            and (required is None or run["name"] in required | _QUALITY)
         ]
+        if required is not None:
+            runs.sort(key=lambda run: run["name"] not in required)
         # Only the checks that count are waited for: a slow advisory review must
         # not hold up the repair of a required check that has already failed.
         if any(run["status"] != "completed" for run in runs):

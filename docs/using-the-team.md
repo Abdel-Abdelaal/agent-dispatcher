@@ -161,9 +161,9 @@ the regression test, the latest required CI results and unresolved review
 findings before merging. Passing CI only establishes the checks that ran.
 AI approval and a telemetry signature do not establish correctness.
 
-The controller can attempt one repair of failed required CI when no task is
-waiting. A second failure needs investigation rather than an unlimited retry
-loop. Do not weaken tests or protections to get a green result.
+The controller can attempt one repair of failed required CI, or of the shared
+hook and lint checks, when no task is waiting. A second failure needs
+investigation rather than an unlimited retry loop. Do not weaken tests or protections to get a green result.
 
 An invalid review verdict gets one formatting retry by the read-only reviewer.
 It never authorizes a code edit or counts as approval. Two invalid replies stop

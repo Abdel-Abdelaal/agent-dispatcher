@@ -53,6 +53,9 @@ configuration reasons, not code:
 1. **CI repair chased the advisory lint failures.** It spent over 20 minutes on E2 trying
     to fix a lint configuration problem that the gate correctly stops agents from touching.
     **Fix (#13):** repair acts only on checks the branch's ruleset requires.
+    Later the shared hook and lint checks were added back. github-governance#50
+    passed every required check, but its hooks and lint failures were in its own
+    files and still blocked the merge. A PR still gets one repair at most.
 2. **No time limit per model call.** A stuck worker could hold the single-run queue for an
     hour. **Fix (#13):** 20 minutes per call, with the whole process tree killed on timeout.
 3. **A failed `gh` call crashed the controller,** leaving a task at `agent:running`.
