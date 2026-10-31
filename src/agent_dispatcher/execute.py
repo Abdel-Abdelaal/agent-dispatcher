@@ -448,10 +448,14 @@ class Run:
                 else _STOP_REASONS.get(result.stop_reason, "")
             )
             raise Stop(self._failure(f"{name} failed while {stage}{why}."))
-        if kind in _CODING:
+        if kind in _CODING and self.unfinished:
             # A later coding call that finished had the chance to complete the
             # timed-out edits, so the warning is cleared; those edits stay in the diff.
             self.unfinished = False
+            self.notes.append(
+                f"{name} finished while {stage}, so later reviews no longer get the "
+                "possibly-unfinished warning."
+            )
         return result.text
 
     def _keeps_timed_out_edits(
@@ -460,7 +464,9 @@ class Run:
         """Keep a coding worker's edits after a time limit, never after other failures.
 
         Lost evidence, spent quota and turn caps still stop the run, and so does a
-        timeout in which this call changed nothing.
+        timeout in which this step changed nothing. `before` is taken once per step,
+        so edits from an earlier turn-capped attempt in the same step count. The
+        `exhausted` check is defensive: `_step` parks a spent provider before this.
         """
         if (
             kind not in _CODING

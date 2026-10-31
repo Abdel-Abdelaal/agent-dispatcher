@@ -1493,6 +1493,19 @@ def test_timed_out_edits_go_to_the_gate_and_an_informed_reviewer(
     assert ("implement", "timed_out") in [(r["stage"], r["outcome"]) for r in records]
 
 
+def test_kept_timed_out_edits_are_still_refused_by_the_gate(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TimedOut("mimo", edits=[{".github/workflows/ci.yml": "on: push\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    gh = FakeGh()
+    outcome = team_run(tmp_path, origin, (planner, worker, reviewer), gh).execute()
+    assert outcome.state is State.FAILED
+    assert "protected path: .github/workflows/ci.yml" in outcome.detail
+    assert reviewer.prompts == []
+    assert "agent/7-run-3" not in git(origin, "branch", "--list")
+
+
 def test_a_timeout_without_edits_still_fails(tmp_path: Path, origin: Path) -> None:
     worker = TimedOut("mimo")
     planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex")
@@ -1604,6 +1617,7 @@ def test_a_later_finished_call_clears_the_unfinished_warning(
     assert "may be\nunfinished" in reviewer.prompts[0][0]
     assert "unfinished" not in reviewer.prompts[1][0]
     assert not run.unfinished
+    assert any("no longer get the possibly-unfinished warning" in n for n in run.notes)
 
 
 def test_a_finished_worker_gets_no_unfinished_warning(
