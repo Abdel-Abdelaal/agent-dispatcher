@@ -6,6 +6,7 @@ the implementation. The controller gates every diff itself, and the reviewer is
 the other thinker from the planner wherever both are available.
 """
 
+import html
 import json
 import re
 from collections.abc import Callable, Mapping
@@ -91,6 +92,9 @@ MAX_REVIEWS = 2
 # repairs are left out: they push to an open PR, so they keep failing closed.
 _CODING = {"implement", "repair"}
 _TITLE_LIMIT = 72
+# Audit issue titles arrive Markdown-escaped and HTML-encoded ("output\_scanner",
+# "&\#x27;"), which a plain-text PR title and its squash commit would keep.
+_MARKDOWN_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _STOP_REASONS = {
     "candidate_unavailable": " (the final candidate evidence could not be retained)",
     "max_turns": " (it ran out of turns even at the hard level)",
@@ -144,7 +148,8 @@ class Stop(Exception):  # noqa: N818 - control flow, not an error condition
 
 def pr_title(issue: Issue) -> str:
     """Return a Conventional PR title built from the issue, never from a model."""
-    subject = " ".join(sanitise(issue.title).split()).rstrip(".")
+    plain = html.unescape(_MARKDOWN_ESCAPE.sub(r"\1", issue.title))
+    subject = " ".join(sanitise(plain).split()).rstrip(".")
     conventional = re.fullmatch(
         r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
         r"(\([A-Za-z0-9_.-]+\))?(!)?: (.+)",
@@ -166,7 +171,9 @@ def pr_title(issue: Issue) -> str:
     )
     first, _, rest = subject.partition(" ")
     first = first.replace("`", "'")
-    if first[1:] and not first[1:].islower() and len(first) < _TITLE_LIMIT // 2:
+    if not first[:1].isupper():
+        pass  # Already passes the title rule; "'Video" must not become code.
+    elif first[1:] and not first[1:].islower() and len(first) < _TITLE_LIMIT // 2:
         # Lowercasing "README", "MiMo" or "X11" garbles it. The pr-title check
         # rejects only a subject that starts with an uppercase letter
         # (^(?![A-Z])), so a code-quoted name passes and stays intact.

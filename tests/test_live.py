@@ -561,6 +561,20 @@ def test_pr_title_subject_passes_the_fleet_title_rule(title: str) -> None:
         ("X11 forwarding fails", ("bug",), "fix: `X11` forwarding fails"),
         ("A flaky test", ("bug",), "fix: a flaky test"),
         ("Read`ME is stale", (), "chore: `Read'ME` is stale"),
+        # Audit issue titles are Markdown-escaped and HTML-encoded.
+        (
+            r"Missing AI\_API\_KEY raises KeyError in promptfoo provider",
+            ("bug",),
+            "fix: missing AI_API_KEY raises KeyError in promptfoo provider",
+        ),
+        (
+            r"&\#x27;Video unavailable&\#x27; counted as rate\-limit block",
+            ("bug",),
+            "fix: 'Video unavailable' counted as rate-limit block",
+        ),
+        (r"delivered\(\) misses errors", ("bug",), "fix: delivered() misses errors"),
+        # A backslash before a letter is not an escape, so it stays.
+        (r"Keep a\b and \\ as typed", (), r"chore: keep a\b and \ as typed"),
         ("L" + "ONG" * 20 + " name", (), ("chore: l" + "ONG" * 20 + " name")[:72]),
     ],
 )
