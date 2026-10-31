@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, SecretStr
+from pydantic import AfterValidator, BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from agent_dispatcher.levels import DEFAULT_LADDER
@@ -21,6 +21,19 @@ def _split_repos(value: object) -> object:
     if isinstance(value, str):
         return [repo.strip() for repo in value.split(",") if repo.strip()]
     return value
+
+
+def _empty_is_none(value: object) -> object:
+    """Treat an empty variable as unset, as `.env.example` leaves it."""
+    return None if value == "" else value
+
+
+def _absolute(path: Path | None) -> Path | None:
+    """Refuse a relative path, which would depend on the working directory."""
+    if path is not None and not path.is_absolute():
+        message = f"must be an absolute path, got {path}"
+        raise ValueError(message)
+    return path
 
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -57,7 +70,10 @@ class Settings(BaseSettings):
     claude_oauth_token: SecretStr | None = None
     # A trusted CLI (stdin to stdout) that scans excerpts before they're kept.
     # Without it, telemetry keeps only each output's hash and length.
-    output_scanner: Path | None = None
+    # A relative path is refused rather than quietly turning the scanner off.
+    output_scanner: Annotated[
+        Path | None, BeforeValidator(_empty_is_none), AfterValidator(_absolute)
+    ] = None
     # Experiment: let easy documentation tasks go straight to the worker. The
     # review still checks the change. Compare telemetry before keeping it on.
     skip_plan_for_easy_docs: bool = False

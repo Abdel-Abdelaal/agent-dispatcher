@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from agent_dispatcher import cli
 from agent_dispatcher.dispatcher import Cycle, Plan, choose_team
@@ -124,6 +125,25 @@ def test_describe_parked_and_empty() -> None:
 def test_settings_accept_a_list_or_a_comma_string() -> None:
     assert Settings(repos=["a/b"]).repos == ["a/b"]
     assert Settings(repos="a/b, c/d").repos == ["a/b", "c/d"]  # pyright: ignore[reportArgumentType]
+
+
+def test_output_scanner_must_be_absolute_or_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A relative scanner used to be dropped without a word, so telemetry kept
+    # running without the control the owner had configured.
+    monkeypatch.setenv("DISPATCHER_OUTPUT_SCANNER", "scanner.exe")
+    with pytest.raises(ValidationError, match="absolute path"):
+        Settings()
+    monkeypatch.setenv("DISPATCHER_OUTPUT_SCANNER", "")
+    assert Settings().output_scanner is None
+    scanner = tmp_path / "scanner.exe"
+    monkeypatch.setenv("DISPATCHER_OUTPUT_SCANNER", str(scanner))
+    assert Settings().output_scanner == scanner
+    # The settings check is the only one, so the hand-off to telemetry must hold.
+    assert cli.telemetry(Settings(work_root=tmp_path)).scanner is not None
+    monkeypatch.delenv("DISPATCHER_OUTPUT_SCANNER")
+    assert cli.telemetry(Settings(work_root=tmp_path)).scanner is None
 
 
 def test_reader_fetches_one_issue_fresh() -> None:

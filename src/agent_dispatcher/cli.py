@@ -183,7 +183,7 @@ def telemetry(settings: Settings) -> Telemetry:
     return Telemetry(
         settings.work_root.resolve() / "telemetry",
         secrets=held_secrets(settings),
-        scanner=command_scanner(scanner) if scanner and scanner.is_absolute() else None,
+        scanner=command_scanner(scanner) if scanner else None,
         revision=controller_revision(Path(__file__).resolve().parent),
     )
 
@@ -326,10 +326,20 @@ def repair_next(
                 continue
             root = work_root(settings)
             writer = GitHubWriter(subprocess_runner, os.environ, root)
-            logs = "\n\n".join(
-                f"### {check.name}\n{writer.failed_log(repo, check.job_id)}"
-                for check in failed[:3]
-            )
+            with_jobs = [check for check in failed if check.job_id][:3]
+            read = [
+                (check.name, writer.failed_log(repo, check.job_id))
+                for check in with_jobs
+            ]
+            # A repair with no error text would be a blind guess that uses up
+            # one of the PR's attempts, so try again on a later cycle instead.
+            if not any(log for _, log in read):
+                names = ", ".join(check.name for check in failed)
+                sys.stderr.write(
+                    f"repair: {repo}#{pr.number} waits, no readable log for {names}\n"
+                )
+                continue
+            logs = "\n\n".join(f"### {name}\n{log}" for name, log in read if log)
             issue = reader.issue(repo, pr.issue)
             task = Task(repo, pr.issue, issue.title)
             run_id = queue.start_run(

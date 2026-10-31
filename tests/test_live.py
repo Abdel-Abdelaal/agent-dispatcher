@@ -985,6 +985,32 @@ def test_failed_checks_wait_for_completion_and_skip_advisory_ones() -> None:
     assert failed == [FailedCheck("ci / Test", "42")]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        None,
+        "",
+        "https://github.com/o/r/actions/runs/41",
+        "https://github.com/other/r/actions/runs/1/job/42",
+        "https://ci.example.com/build/42",
+        "https://github.com/o/r/actions/runs/1/job/42/extra",
+    ],
+)
+def test_failed_checks_keep_only_this_repos_actions_job_ids(url: str | None) -> None:
+    # The last part of any other link is not a job id: reading it as one would
+    # fetch no log, or the wrong one.
+    done = [
+        {
+            "name": "ci / Test",
+            "status": "completed",
+            "conclusion": "failure",
+            "details_url": url,
+        }
+    ]
+    failed = GitHubReader(pulls_client(done)).failed_checks("o/r", "abc")
+    assert failed == [FailedCheck("ci / Test", "")]
+
+
 def test_failed_log_keeps_the_tail_and_tolerates_errors(tmp_path: Path) -> None:
     class LogGh(FakeGh):
         def __call__(
@@ -1065,6 +1091,65 @@ def test_repair_next_repairs_once_per_pr(
         assert repaired == [(9, "### ci / Test\nlog 42")]
         assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
         assert len(repaired) == 1
+    queue.close()
+
+
+def test_repair_next_waits_rather_than_repair_without_any_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    read: list[str] = []
+
+    class Writer:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def failed_log(self, repo: str, job_id: str) -> str:
+            del repo
+            read.append(job_id)
+            return "boom" if job_id == "7" else ""
+
+    def no_run(*_: object, **__: object) -> object:
+        raise AssertionError
+
+    monkeypatch.setattr(cli, "make_run", no_run)
+    monkeypatch.setattr(cli, "GitHubWriter", Writer)
+    settings = Settings(repos=["o/r"], work_root=tmp_path / "runs", mimo_api_key=None)
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    with httpx.Client() as client:
+        # No job link, and a job whose log can't be read: nothing to repair from.
+        reader = FakeReader(
+            [FailedCheck("ci / Test", ""), FailedCheck("ci / Lint", "8")]
+        )
+        assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
+        assert read == ["8"]
+        assert queue.repairs("o/r", 9) == 0
+        # The wait is said in the cycle log, so it can't look like nothing failed.
+        assert capsys.readouterr().err == (
+            "repair: o/r#9 waits, no readable log for ci / Test, ci / Lint\n"
+        )
+
+        repaired: list[str] = []
+
+        class FakeRun:
+            def repair(self, pr: AgentPr, logs: str) -> cli.Outcome:
+                del pr
+                repaired.append(logs)
+                return cli.Outcome(State.REVIEW, "fixed")
+
+        def fake_make_run(*_: object, **__: object) -> FakeRun:
+            return FakeRun()
+
+        monkeypatch.setattr(cli, "make_run", fake_make_run)
+        # Checks without a job link don't use up the three logs that are read.
+        unlinked = [FailedCheck(f"ext / {n}", "") for n in range(3)]
+        reader = FakeReader(
+            [*unlinked, FailedCheck("ci / Lint", "8"), FailedCheck("ci / Test", "7")]
+        )
+        assert cli.repair_next(settings, reader, queue, client) is not None  # pyright: ignore[reportArgumentType]
+        # Only the readable log goes to the agent; an empty section adds nothing.
+        assert repaired == ["### ci / Test\nboom"]
     queue.close()
 
 
@@ -1252,13 +1337,13 @@ def test_only_required_failures_are_repaired() -> None:
             "name": "ci / Test",
             "status": "completed",
             "conclusion": "failure",
-            "details_url": "x/job/1",
+            "details_url": "https://github.com/o/r/actions/runs/5/job/1",
         },
         {
             "name": "lint / Lint (all languages)",
             "status": "completed",
             "conclusion": "failure",
-            "details_url": "x/job/2",
+            "details_url": "https://github.com/o/r/actions/runs/5/job/2",
         },
     ]
     reader = GitHubReader(pulls_client(done))
@@ -1728,7 +1813,7 @@ def test_repair_does_not_wait_for_advisory_or_optional_checks() -> None:
             "name": "ci / Types",
             "status": "completed",
             "conclusion": "failure",
-            "details_url": "x/job/7",
+            "details_url": "https://github.com/o/r/actions/runs/5/job/7",
         },
         {
             "name": "review / ai / Isolated analysis",
