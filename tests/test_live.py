@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -532,6 +533,17 @@ def test_pr_title_is_conventional_and_bounded() -> None:
 
 
 @pytest.mark.parametrize(
+    "title", ["README claims drift", "MiMo times out", "X11 fails", "Add previews"]
+)
+def test_pr_title_subject_passes_the_fleet_title_rule(title: str) -> None:
+    # The fleet pr-title check: subjectPattern ^(?![A-Z]).+$
+    issue = Issue("o/r", 1, title, "", ("bug",), "owner", is_open=True)
+    subject = pr_title(issue).split(": ", 1)[1]
+    assert re.fullmatch(r"(?![A-Z]).+", subject)
+    assert subject.count("`") % 2 == 0
+
+
+@pytest.mark.parametrize(
     ("title", "labels", "expected"),
     [
         ("feat(api): support HEAD", (), "feat(api): support HEAD"),
@@ -539,6 +551,17 @@ def test_pr_title_is_conventional_and_bounded() -> None:
         ("Add previews", ("enhancement",), "feat: add previews"),
         ("Explain preview", ("documentation",), "docs: explain preview"),
         ("do: strange header", (), "chore: do: strange header"),
+        (
+            "README claims nightly drift",
+            ("documentation",),
+            "docs: `README` claims nightly drift",
+        ),
+        ("MiMo times out", ("bug",), "fix: `MiMo` times out"),
+        ("CI", (), "chore: `CI`"),
+        ("X11 forwarding fails", ("bug",), "fix: `X11` forwarding fails"),
+        ("A flaky test", ("bug",), "fix: a flaky test"),
+        ("Read`ME is stale", (), "chore: `Read'ME` is stale"),
+        ("L" + "ONG" * 20 + " name", (), ("chore: l" + "ONG" * 20 + " name")[:72]),
     ],
 )
 def test_pr_title_preserves_valid_intent_without_double_prefix(

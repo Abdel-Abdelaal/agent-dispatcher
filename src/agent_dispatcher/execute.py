@@ -164,7 +164,15 @@ def pr_title(issue: Issue) -> str:
         ),
         "chore",
     )
-    subject = subject[:1].lower() + subject[1:]
+    first, _, rest = subject.partition(" ")
+    first = first.replace("`", "'")
+    if first[1:] and not first[1:].islower() and len(first) < _TITLE_LIMIT // 2:
+        # Lowercasing "README", "MiMo" or "X11" garbles it. The pr-title check
+        # rejects only a subject that starts with an uppercase letter
+        # (^(?![A-Z])), so a code-quoted name passes and stays intact.
+        subject = f"`{first}` {rest}".rstrip()
+    else:
+        subject = subject[:1].lower() + subject[1:]
     return f"{kind}: {subject}"[:_TITLE_LIMIT].rstrip()
 
 
