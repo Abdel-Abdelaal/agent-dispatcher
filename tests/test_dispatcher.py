@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -251,3 +252,12 @@ def test_auto_discovers_public_repos_and_never_the_controller() -> None:
         exclude_repos=["o/agent-dispatcher"],
     )
     assert cli.target_repos(listed, reader) == ["o/a"]
+
+
+def test_tests_never_see_the_controllers_real_configuration(tmp_path: Path) -> None:
+    # conftest.py: the production checkout's .env holds real keys and the real
+    # OpenCode path; reading it once made the suite open the interactive UI.
+    assert Path.cwd() == tmp_path
+    assert not [name for name in os.environ if name.upper().startswith("DISPATCHER_")]
+    (tmp_path / ".env").write_text("DISPATCHER_REPOS=leak/x\n", encoding="utf-8")
+    assert Settings().repos == ["Abdel-Abdelaal/shortlink"]

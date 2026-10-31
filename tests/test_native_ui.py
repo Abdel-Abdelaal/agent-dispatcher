@@ -206,10 +206,10 @@ def test_controller_reuses_owner_login_without_copying_host_secrets(
 
 
 def test_native_launcher_refuses_missing_key_or_unreviewed_binary(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(native_ui, "load_settings", Mock(return_value=Settings()))
-    assert native_ui.main() == 1
+    assert native_ui.main(tmp_path) == 1
     monkeypatch.setattr(
         native_ui,
         "load_settings",
@@ -219,7 +219,7 @@ def test_native_launcher_refuses_missing_key_or_unreviewed_binary(
             )
         ),
     )
-    assert native_ui.main() == 1
+    assert native_ui.main(tmp_path) == 1
 
 
 def test_native_launcher_starts_real_interface_without_auto_permissions(
@@ -234,7 +234,7 @@ def test_native_launcher_starts_real_interface_without_auto_permissions(
     monkeypatch.setattr(
         native_ui, "resume_args", Mock(return_value=["--session", "ses_saved"])
     )
-    assert native_ui.main() == 0
+    assert native_ui.main(tmp_path) == 0
     argv = launch.call_args.args[0]
     assert "--session" in argv
     assert "--pure" in argv
