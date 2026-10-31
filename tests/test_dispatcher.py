@@ -139,6 +139,10 @@ def test_output_scanner_must_be_absolute_or_unset(
     scanner = tmp_path / "scanner.exe"
     monkeypatch.setenv("DISPATCHER_OUTPUT_SCANNER", str(scanner))
     assert Settings().output_scanner == scanner
+    # The settings check is the only one, so the hand-off to telemetry must hold.
+    assert cli.telemetry(Settings(work_root=tmp_path)).scanner is not None
+    monkeypatch.delenv("DISPATCHER_OUTPUT_SCANNER")
+    assert cli.telemetry(Settings(work_root=tmp_path)).scanner is None
 
 
 def test_reader_fetches_one_issue_fresh() -> None:

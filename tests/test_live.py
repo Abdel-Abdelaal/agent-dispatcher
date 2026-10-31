@@ -1095,7 +1095,9 @@ def test_repair_next_repairs_once_per_pr(
 
 
 def test_repair_next_waits_rather_than_repair_without_any_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     read: list[str] = []
 
@@ -1123,6 +1125,10 @@ def test_repair_next_waits_rather_than_repair_without_any_log(
         assert cli.repair_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
         assert read == ["8"]
         assert queue.repairs("o/r", 9) == 0
+        # The wait is said in the cycle log, so it can't look like nothing failed.
+        assert capsys.readouterr().err == (
+            "repair: o/r#9 waits, no readable log for ci / Test, ci / Lint\n"
+        )
 
         repaired: list[str] = []
 
@@ -1136,8 +1142,10 @@ def test_repair_next_waits_rather_than_repair_without_any_log(
             return FakeRun()
 
         monkeypatch.setattr(cli, "make_run", fake_make_run)
+        # Checks without a job link don't use up the three logs that are read.
+        unlinked = [FailedCheck(f"ext / {n}", "") for n in range(3)]
         reader = FakeReader(
-            [FailedCheck("ci / Lint", "8"), FailedCheck("ci / Test", "7")]
+            [*unlinked, FailedCheck("ci / Lint", "8"), FailedCheck("ci / Test", "7")]
         )
         assert cli.repair_next(settings, reader, queue, client) is not None  # pyright: ignore[reportArgumentType]
         # Only the readable log goes to the agent; an empty section adds nothing.
