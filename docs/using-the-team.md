@@ -97,7 +97,9 @@ in-memory-only chat behavior; do not publish the native session directory.
 OpenCode supplies its normal conversation, session and permission interface.
 Shell commands `mimo status` and `mimo logs` still work without a model call.
 `mimo start` starts already queued work and saves MiMo-only mode for future cycles.
-`mimo task` keeps the optional explicit form. Closing the UI does not stop an
+`mimo task` keeps the optional explicit form. It waits up to two minutes for GitHub
+to list the new issue as ready before starting a cycle, because a cycle started
+sooner can miss it. Closing the UI does not stop an
 already-started background dispatcher run. Requests run serially and may wait.
 
 The front-end agent has no arbitrary shell, local file editing, deployment or

@@ -108,6 +108,21 @@ if ($Mode -eq 'task') {
         $issue = & gh issue create --repo $target --title $title --body-file $bodyPath --label 'agent:ready'
         if ($LASTEXITCODE -ne 0) { throw 'Issue creation failed; no cycle was requested. Check GitHub before retrying.' }
         Write-Output "Task queued: $issue"
+        # GitHub's label listing and events can lag a new issue by a minute or
+        # two; a cycle started before both show it would miss the task.
+        $number = ($issue.Trim() -split '/')[-1]
+        $listed = $false
+        for ($attempt = 0; $attempt -lt 24 -and !$listed; $attempt++) {
+            $ready = & gh api "repos/$target/issues?labels=agent:ready&state=open&per_page=50" --jq '.[].number'
+            # Filtered here: Windows PowerShell drops quotes inside a jq argument.
+            $labelled = @(& gh api "repos/$target/issues/$number/events" | ConvertFrom-Json |
+                Where-Object { $_.event -eq 'labeled' -and $_.label.name -eq 'agent:ready' })
+            $listed = (@($ready) -contains $number) -and ($labelled.Count -gt 0)
+            if (!$listed) { Start-Sleep -Seconds 5 }
+        }
+        if (!$listed) {
+            Write-Output 'GitHub does not list the task as ready yet; a later scheduled cycle will take it.'
+        }
     } finally {
         if (Test-Path -LiteralPath $bodyPath) { Remove-Item -LiteralPath $bodyPath }
     }
