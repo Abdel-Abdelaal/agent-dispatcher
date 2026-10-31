@@ -905,6 +905,24 @@ def test_a_rejected_repair_is_reported_and_not_pushed(
     assert "rejected the repair" in comment
 
 
+def test_a_timed_out_ci_repair_with_edits_still_fails_closed(
+    tmp_path: Path, origin: Path
+) -> None:
+    # CI repairs push to an open PR, so their time-limited edits are never kept.
+    pr = published_pr(tmp_path, origin)
+    worker = TimedOut("claude", edits=[{"docs/api.md": "# API\n\nHalf fixed.\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run, gh = repair_run(tmp_path, origin, worker, reviewer)
+    outcome = run.repair(pr, "E501 line too long")
+    assert outcome.state is State.FAILED
+    assert "hit the 20-minute limit" in outcome.detail
+    assert reviewer.prompts == []
+    assert run.unfinished is False
+    assert git(origin, "rev-parse", "agent/7-run-3").strip() == pr.sha
+    comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
+    assert "stopped" in comment
+
+
 def test_a_spent_worker_parks_quietly(tmp_path: Path, origin: Path) -> None:
     pr = published_pr(tmp_path, origin)
     worker = FakeModel("claude")

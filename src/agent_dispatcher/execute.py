@@ -360,6 +360,9 @@ class Run:
     ) -> str:
         """Run one model call, record it, and stop the run if it failed or ran out.
 
+        One exception: a coding call (implement or repair, never a CI repair) that
+        hit its time limit after making new edits returns normally, and the run is
+        marked unfinished so the gate and an informed reviewer judge those edits.
         A worker may continue at a higher level in the same clone. Read-only
         planning/review stops at its cap: restarting loses its conversation and
         repeats the same reading rather than continuing useful file work.
@@ -446,7 +449,8 @@ class Run:
             )
             raise Stop(self._failure(f"{name} failed while {stage}{why}."))
         if kind in _CODING:
-            # A later coding call that finished replaces the unfinished diff.
+            # A later coding call that finished had the chance to complete the
+            # timed-out edits, so the warning is cleared; those edits stay in the diff.
             self.unfinished = False
         return result.text
 
