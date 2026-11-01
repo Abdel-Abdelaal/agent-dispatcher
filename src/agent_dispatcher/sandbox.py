@@ -184,8 +184,11 @@ def program(name: str) -> str:
     """
     if Path(name).is_absolute():
         return name
-    extensions = os.environ.get("PATHEXT", ".EXE").split(os.pathsep)
-    suffixes = [""] if os.name != "nt" else [ext.lower() for ext in extensions]
+    suffixes = [""]
+    if os.name == "nt":
+        suffixes = [
+            ext.lower() for ext in os.environ.get("PATHEXT", ".EXE").split(os.pathsep)
+        ]
     for folder in os.environ.get("PATH", "").split(os.pathsep):
         if not folder or folder == os.curdir or not Path(folder).is_absolute():
             continue
