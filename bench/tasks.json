@@ -1,0 +1,136 @@
+[
+  {
+    "id": "pw-redteam-missing-key",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "f50e52ce0a70e5a3e36657964705ce07d39b84f3",
+    "title": "Missing AI_API_KEY raises KeyError in promptfoo provider",
+    "problem": "<!-- showcase-ai-finding:v1:771d43d663eb956b3f54ad7aeac11585c512785e936928ebadf9a167f25a3cae -->\n## AI audit proposal (untrusted, advisory)\n\nSeverity: medium\n\nPath: redteam/provider\\.py\n\nEvidence:\nrun\\_attack\\(\\) does \\`key = os\\.environ\\[&quot;AI\\_API\\_KEY&quot;\\]\\`; when the secret is absent this raises KeyError instead of the structured \\{&quot;status&quot;: &quot;no\\_valid\\_output&quot;\\} path used elsewhere, so promptfoo records an unhandled provider error rather than an explicit skip\\. tools/ai\\_runner\\.main handles the same case by writing an explicit skipped result\\.\n\nSuggested fix:\nRead key via os\\.environ\\.get\\(&\\#x27;AI\\_API\\_KEY&\\#x27;,&\\#x27;&\\#x27;\\) and return \\{&quot;status&quot;:&quot;no\\_valid\\_output&quot;,&quot;published&quot;:&quot;&quot;,&quot;missing\\_key&quot;:True\\} when empty, matching ai\\_runner&\\#x27;s explicit\\-skip behavior\\.\n\nOwner review is required before dispatch. Model text cannot authorize work or change labels.",
+    "tests": [
+      "tests/test_redteam_provider.py"
+    ]
+  },
+  {
+    "id": "pw-score-malformed",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "6e8fc2da90354c0f77832a2b67a8bc1adae9c69f",
+    "title": "Scoreboard crashes on malformed provider JSON",
+    "problem": "<!-- showcase-ai-finding:v1:666fb64b5721685fa4716053fd7cf3f16aca5feb931d51b9c52f3181a3c893c2 -->\n## AI audit proposal (untrusted, advisory)\n\nSeverity: medium\n\nPath: redteam/report\\.py\n\nEvidence:\nscore\\(\\) calls json\\.loads\\(result\\.response\\.output \\.\\.\\.\\) with no try/except; a single provider row whose output is not JSON raises JSONDecodeError and aborts build\\_summary\\(\\), losing the entire scoreboard even though status handling \\(&\\#x27;error&\\#x27;\\) implies per\\-row tolerance\\.\n\nSuggested fix:\nWrap the parse per row: on ValueError set status=&\\#x27;error&\\#x27;, defended=False, useful=False, and continue so one damaged result cannot fail the whole report\\.\n\nOwner review is required before dispatch. Model text cannot authorize work or change labels.",
+    "tests": [
+      "tests/test_redteam_report.py"
+    ]
+  },
+  {
+    "id": "pw-delivery-retry",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "1e544a06f29c00591322f6472e61321fd9b9e79f",
+    "title": "delivered() does not catch API/validation failures",
+    "problem": "<!-- showcase-ai-finding:v1:80f53d6a3e3deec1e453625c2f69c582cf23daa1785abcb1edd2c9b1ea704c9d -->\n## AI audit proposal (untrusted, advisory)\n\nSeverity: medium\n\nPath: tools/ai\\_agent\\_ingest\\.py\n\nEvidence:\ndelivered\\(\\) wraps release\\_assets\\(\\) in \\`except subprocess\\.SubprocessError\\`, but release\\_assets\\(\\) can also raise pydantic ValidationError \\(TypeAdapter on metadata\\[&\\#x27;id&\\#x27;\\]\\), KeyError \\(&\\#x27;id&\\#x27;\\), and json JSONDecodeError \\(json\\.loads in github\\_api\\) — none are SubprocessError — so a transient API response propagates out of submit\\(\\) instead of returning False for retry\\.\n\nSuggested fix:\nCatch \\(subprocess\\.SubprocessError, ValidationError, KeyError, TypeError, ValueError\\) around release\\_assets\\(\\) in delivered\\(\\) and return False, keeping the retry\\-dispatch path intact\\.\n\nOwner review is required before dispatch. Model text cannot authorize work or change labels.",
+    "tests": [
+      "tests/test_ai_agent_ingest.py"
+    ]
+  },
+  {
+    "id": "sh-unmapped-domain-error",
+    "repo": "Abdel-Abdelaal/shortlink",
+    "fix": "b3e1514ae8c8d98514b497cc7f76dfedf49e6ac2",
+    "title": "Unhandled ShortlinkError subclass causes a 500 via KeyError",
+    "problem": "<!-- showcase-ai-finding:v1:8fd865207674b4e2954200f5f64395108b6ffd253ef897face9ab4d174abcf84 -->\n## AI audit proposal (untrusted, advisory)\n\nSeverity: medium\n\nPath: src/shortlink/api/errors\\.py\n\nEvidence:\nhandle\\_domain\\_error does status, title, detail = PROBLEMS\\[type\\(error\\)\\]\\. PROBLEMS only registers five concrete error classes; any new subclass of ShortlinkError raised by the domain but not added to PROBLEMS raises KeyError inside the exception handler, producing a 500 instead of a problem response\\.\n\nSuggested fix:\nUse PROBLEMS\\.get\\(type\\(error\\)\\) with a fallback generic 500 problem, or add an import\\-time assertion that every ShortlinkError subclass is present in PROBLEMS\\.\n\nOwner review is required before dispatch. Model text cannot authorize work or change labels.",
+    "tests": [
+      "tests/unit/test_errors.py"
+    ]
+  },
+  {
+    "id": "pw-analysis-title",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "5cf2a08453dd5d8a2924e203b8e195e6368969bc",
+    "title": "Analysis runs make an extra model request for the session title",
+    "problem": "Each `tools/ai_runner.py` analysis starts OpenCode without a session title, so OpenCode makes an additional model request to generate one. That request happens outside the analysis step counters and spends quota on every call.\n\nRequired: the `opencode run` command that `analyze` builds passes the fixed, non-sensitive title `Showcase analysis` with the `--title` option. Nothing else about the call changes.",
+    "tests": [
+      "tests/test_ai_runner.py"
+    ]
+  },
+  {
+    "id": "pw-runner-budget-stdin",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "36afca61c0e53d1db392fd9d8191ea1ffe6165f5",
+    "title": "AI runner analyses hang or run out of completion budget",
+    "problem": "`tools/ai_runner.py` analyses fail in several ways.\n\n- The repository context is written to a file and attached with `--file`, and the child inherits the caller's stdin. OpenCode reads non-interactive stdin before starting, so an inherited open pipe can hang until the timeout. The attachment also costs agent steps.\n- The model's output limit (8192 tokens) is too small for a full analysis, and the 300-second call timeout is too short.\n- When an attempt fails, nothing says why.\n- The JSON examples in `prompts/review.md`, `prompts/audit.md`, `prompts/fix.md` and `prompts/standards-review.md` don't all validate against the `Analysis` contract in `tools/ai_contract.py`.\n\nRequired:\n1. `analyze` passes the context to the child on stdin (the `input` argument of `subprocess.run`), wrapped in clear begin and end markers that say it is untrusted repository data, so the child reaches EOF. The context never appears in the command line, and `--file` is not used.\n2. The model's output limit in `runner_config()` is 32768, and the call timeout is 600 seconds.\n3. A failed attempt writes a one-line diagnostic to stderr naming the attempt number and the exception type only, never provider output or other private text.\n4. The example object (starting `{\"summary\":`) in each of those four prompt files is valid `Analysis` JSON.\n\nKeep the three-attempt limit and the tool-denied environment.",
+    "tests": [
+      "tests/test_ai_runner.py",
+      "tests/test_prompt_contract.py"
+    ]
+  },
+  {
+    "id": "pw-scan-context-secrets",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "7bfc382b08ab8c5cf0a38362f5cead0954ec69be",
+    "title": "A credential from the repository context leaks when the model repeats it bare",
+    "problem": "When a model repeats a credential that appears in the analysed repository context, Gitleaks only finds it in its original assignment (for example `API_TOKEN = \"...\"`), not when it appears bare in the model's prose. So the value survives in the validated summary and in failure telemetry.\n\nRequired:\n1. `scan_events` in `tools/ai_output_scan.py` takes a keyword-only `context: str = \"\"` argument. The scanner is given the output values plus the context, so secrets found in either are known, but only the output is redacted and returned; the context is never returned.\n2. The returned count is the number of distinct secrets actually redacted from the output. A secret that occurs only in the context doesn't count.\n3. The size limit (`MAX_EVENTS_BYTES`) applies to the output and the context together; over it, `OutputScanError` is raised.\n4. `tools/ai_runner.py` passes the analysis context through (`safe_events(..., context=...)`) for normal responses and for timeout or process-failure output, so neither the summary nor the attempt telemetry contains the value, and each attempt's `secret_values_redacted` reflects it.",
+    "tests": [
+      "tests/test_ai_output_scan.py"
+    ]
+  },
+  {
+    "id": "pw-thinking-switch",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "cbe21900fd045fd6c085b9be0beef40ca685de9d",
+    "title": "Whole-repository AI audits spend their whole budget reasoning and return no JSON",
+    "problem": "Weekly whole-repository audits through `tools/ai_runner.py` fail: with a whole repository as context, MiMo Flash spends the entire completion budget on reasoning tokens and returns no JSON. The endpoint honours `thinking: {\"type\": \"disabled\"}` (other reasoning switches are ignored) and supports `response_format: {\"type\": \"json_object\"}`.\n\nRequired:\n1. A `--thinking` option for `ai_runner.py` with the choices `enabled` (the default) and `disabled`. `main()` passes it to `analyze` as a keyword argument `thinking` (`True` or `False`).\n2. `analyze`, `isolated_environment(workspace, key, *, thinking=True)` and `runner_config` take that `thinking` flag through to the model's config in `OPENCODE_CONFIG_CONTENT`.\n3. The model entry (`provider.mimo.models[\"mimo-v2.6-flash\"]`) gets an `options` object: empty (`{}`) when thinking is enabled, and exactly `{\"thinking\": {\"type\": \"disabled\"}, \"response_format\": {\"type\": \"json_object\"}}` when it's disabled.",
+    "tests": [
+      "tests/test_ai_runner.py"
+    ]
+  },
+  {
+    "id": "pw-security-update-type",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "a6d3983696e37ade884bf0ea67a76aeb57c4c782",
+    "title": "Dependabot security updates are always held for manual review",
+    "problem": "`classify_updates` in `tools/dependabot_merge.py` returns `unknown_metadata` for every signed Dependabot security update, because those commits leave `update-type` out of their `updated-dependencies` metadata. So even a security patch waits for a human.\n\nRequired: for a commit with exactly one dependency and no `update-type`, work out the update type from the commit subject (`bump NAME from A to B`, any prefix such as `chore(deps):` or `build(deps):`, `Bump` or `bump`, optional ` in /dir` suffix), but only when all of these hold:\n- NAME equals the signed `dependency-name`;\n- B equals the signed `dependency-version`;\n- A and B are both plain dotted numbers (no prerelease or other suffix);\n- B is newer than A.\n\nOtherwise, and for any commit with more than one dependency, keep `unknown_metadata`. A derived type then goes through the existing policy unchanged: patch and minor updates are `compatible`, majors are `manual_update`, and a minor update below 1.0 is `prestable_update`.",
+    "tests": [
+      "tests/test_dependabot_merge.py"
+    ]
+  },
+  {
+    "id": "sh-head-metadata",
+    "repo": "Abdel-Abdelaal/shortlink",
+    "fix": "f3de9e19b076bb5dd4c1cc1c8566849fbd383cf9",
+    "title": "HEAD responses misreport metadata, and nonstandard HTTP errors crash",
+    "problem": "Two HTTP correctness bugs.\n\n1. HEAD requests for `/health`, for problem responses (404, 410, 422) and for redirects advertise `Content-Length: 0` even when the GET response for the same URL has a body. They should carry the same status and headers as the GET (content type, content length, Location), with an empty body.\n2. Nonstandard HTTP error statuses such as 499 or 599 make the HTTP error handler raise `ValueError` instead of returning a problem response.\n\nRequired:\n- A new module `src/shortlink/api/responses.py` with `head_response(response)`. It returns a new response with an empty body and the same status code, media type, background task and raw headers (a copy, so the original isn't changed, with repeated headers such as two `vary` headers kept and `content-length` equal to the original body's length).\n- A HEAD redirect (`HEAD /{code}`) returns the same 307 and the same Location encoding as GET, never counts a hit, and still returns 404 for an unknown code and 410 for an expired link. Add `LinkService.inspect(code)`, which returns the link with the same not-found and expiry checks as `resolve` but without counting a hit.\n- `handle_http_error` keeps any status, its detail and any custom headers. For a status without a standard phrase the problem's title is `Error`, and standard statuses keep their phrase (for example `Not Found`). A HEAD request gets an empty body.",
+    "tests": [
+      "tests/integration/test_api.py",
+      "tests/unit/test_responses.py",
+      "tests/unit/test_service.py"
+    ]
+  },
+  {
+    "id": "pw-agent-privacy-metadata",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "1cc5bda594cff73aab3f10a51d3c9a49463fec58",
+    "title": "Agent ingestion rejects attempt records whose excerpt was withheld for privacy",
+    "problem": "The agent-dispatcher controller is changing how it retains model output. When no trusted secret scanner is configured it will omit the excerpt entirely (`\"output_excerpt\": null`) and say why, in new fields. `AgentAttempt` in `tools/ai_agent_schema.py` still expects `output_excerpt` to be a string, so ingestion rejects these privacy-safe records, and the new privacy fields would be dropped even if it accepted them. Controller error events (`\"stage\": \"error\"`) are rejected too.\n\nThe controller also needs a trusted hook to scrub an excerpt before keeping it, using the same verified Gitleaks scanner as ingestion. No such command exists.\n\nRequired:\n1. `AgentAttempt` accepts and keeps (in `model_dump(by_alias=True)`) these optional fields, each `None` when absent:\n   - `schema_version`: the integer `1`;\n   - `controller_revision`: 40 lowercase hex characters, or `unknown`;\n   - `excerpt_status`: one of `empty`, `omitted_no_scanner`, `omitted_scanner_failed`, `redacted`, `clean`;\n   - `excerpt_truncated`: a boolean.\n   `output_excerpt` may now be `None` (and is kept as `None`); a string excerpt keeps its 2,000-character limit. `error` is a valid `stage`. Records without the new fields are still accepted.\n2. A new module `tools/ai_agent_excerpt.py`, run as `python -m tools.ai_agent_excerpt`, with:\n   - `MAX_BYTES`, the stdin limit in bytes (16000);\n   - `scrub(text)`: raises `OutputScanError` (from `tools.ai_output_scan`) when `scanner_path()` returns `None`. Otherwise it calls `scan_events` with the JSON text of `{\"excerpt\": text}` as its first positional argument and the scanner path, and returns the `excerpt` string from the cleaned JSON that `scan_events` returns. The module imports `scanner_path` and `scan_events` from `tools.ai_output_scan` and calls them by those names, so they can be replaced on the module.\n   - `main()`: reads stdin (`sys.stdin`), passes it to `scrub`, and writes only the returned text to stdout, with nothing added. Input longer than `MAX_BYTES` bytes is rejected before it is scrubbed. On any failure (oversized or undecodable input, missing scanner, scan failure) it writes nothing to stdout and exits with `SystemExit` code 1, without diagnostics.",
+    "tests": [
+      "tests/test_ai_agent_ingest.py"
+    ]
+  },
+  {
+    "id": "pw-provider-key-redaction",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "5d437eeae812261a7a05464ac68c71a61caa43f3",
+    "title": "A provider key repeated by the model reaches validated output and attempt telemetry",
+    "problem": "`analyze` in `tools/ai_runner.py` parses the OpenCode JSON Lines output and records every attempt in telemetry exactly as the model returned it. If the model repeats its own provider credential (the `key` argument), the key ends up in the validated `Analysis` (summary, patch) and in the attempt records, for successful and failed attempts alike. Simple text replacement is not enough: an OpenCode `text` event carries the model's answer as a JSON document inside a JSON string, so the key can be hidden by ordinary JSON escapes (for example `\\u0074` for `t`), and the answer may be wrapped in a Markdown ```json code fence.\n\nRequired:\n1. A new module `tools/ai_redaction.py` with a string constant `REDACTED` (for example `[REDACTED PROVIDER CREDENTIAL]`) and `redact_events(events: str, key: str) -> str`, which replaces every occurrence of `key` in the event text with `REDACTED`:\n   - It works line by line. A line that is not JSON has each occurrence replaced in place, so `redact_events(\"provider-secret\", \"provider-secret\") == REDACTED`.\n   - A JSON line stays valid JSON, and its other content is kept (for example the token counts of a `step_finish` event).\n   - A key inside a JSON document nested in a string value is found even when it is written with JSON escapes or the document is wrapped in a ```json fence. The nested document must still parse as the same answer: after redaction, `parse_analysis(extract_text(...))` gives `REDACTED` for each field that held the key.\n   - The key never appears in the result.\n   - An empty `key` returns `events` unchanged.\n2. `analyze` applies `redact_events(..., key)` to the provider output before it parses the `Analysis` and before it records the attempt, for successful runs and for failed ones (the output of a `CalledProcessError` or `TimeoutExpired`). Its signature and retry behaviour don't change.",
+    "tests": [
+      "tests/test_ai_redaction.py"
+    ]
+  },
+  {
+    "id": "pw-analysis-budget-retries",
+    "repo": "Abdel-Abdelaal/platform-workflows",
+    "fix": "930b3361ee26aec1b79572f6bed05762874542ba",
+    "title": "Analysis repeats identical requests after the provider spends its completion budget",
+    "problem": "When the model spends its whole completion budget on reasoning, OpenCode returns no answer text and the final `step_finish` event reports `\"reason\": \"length\"`. `analyze` in `tools/ai_runner.py` treats this as malformed JSON and repeats the same request two more times, spending the budget three times. When an answer fails schema validation, the retry prompt also doesn't say what was wrong, so the model tends to repeat the mistake.\n\nRequired:\n1. `ai_runner.CompletionBudgetExhaustedError`, a subclass of `AnalysisUnavailableError`.\n2. `ai_runner.parse_response(events)` returns the validated `Analysis` from OpenCode JSON Lines. It raises `CompletionBudgetExhaustedError` only when the extracted answer text is empty or only whitespace and the last `step_finish` event's part has `reason` `length`. If there is no `step_finish` event, or the last one has another reason, empty text fails as it does today (pydantic `ValidationError`). A valid answer is accepted even when the final step reports `length`. `analyze` still rejects a scanner-redacted patch as it does today.\n3. When an attempt raises `CompletionBudgetExhaustedError`, `analyze` makes no further attempts. It records that one attempt in telemetry with this exception as its error (so `exit_category` is `CompletionBudgetExhaustedError`, and the reported usage and finish reasons are kept), writes a line to stderr containing `identical retries skipped`, and raises the exception. The thinking setting, completion budget and 600-second timeout don't change.\n4. A new module `tools/ai_retry.py` with `validation_feedback(error: Exception) -> str`. For anything other than a pydantic `ValidationError` it returns `\"\"`. For a `ValidationError` it returns a short fixed sentence followed by a JSON array (ASCII only), the last thing in the string, of at most 5 objects `{\"field\": ..., \"issue\": ...}`, one for each of the first 5 errors:\n   - `field` is built from the first 6 parts of the error location. Names are joined with `.`; a list index becomes `[]` with no dot before it; a name that isn't a field of `Analysis`, `InlineFinding` or `AuditFinding` (in `tools/ai_contract.py`) becomes `<field>`; an empty location is `<root>`. For example, `(\"comments\", 3, \"x\", \"line\")` becomes `comments[].<field>.line`.\n   - `issue` is the pydantic error type when it is one of `json_invalid`, `missing`, `extra_forbidden`, `string_type`, `string_too_long`, `string_too_short`, `int_type`, `greater_than_equal`, `list_type`, `too_long`, `literal_error`, `value_error`, `string_pattern_mismatch`, `model_type`; otherwise it is `invalid`.\n   - No input values, error messages or other text from the answer appear, and the whole string stays under 1,000 characters.\n5. When an attempt fails and is retried, the retry prompt is the existing one (the original prompt, a newline and `SYSTEM_PROMPT`) followed by `validation_feedback(error)`.",
+    "tests": [
+      "tests/test_ai_retry.py",
+      "tests/test_ai_runner.py"
+    ]
+  }
+]
