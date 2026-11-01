@@ -5,6 +5,7 @@ import json
 import shlex
 import sys
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from agent_dispatcher.sandbox import (
     CHECKS,
     COMMAND_FILE,
     OUTPUT_LIMIT,
+    STARTED,
     Sandbox,
     SandboxError,
     SandboxResult,
@@ -23,6 +25,11 @@ from agent_dispatcher.sandbox import (
     environment_key,
 )
 from agent_dispatcher.settings import Settings
+
+DISK_OK = (
+    "Filesystem 1-blocks Used Available Capacity Mounted on\n"
+    "/dev/sda1 100 1 99999999999 1% /d\n"
+)
 
 
 class FakeDocker:
@@ -38,10 +45,14 @@ class FakeDocker:
         del timeout
         self.calls.append((argv, stdin))
         line = " ".join(argv)
+        # A command run prints the start marker first, as the container does.
+        started = STARTED + "\n" if STARTED in argv[-1] else ""
         for match, code, output in self.answers:
             if match in line:
-                return code, output
-        return 0, ""
+                return code, started + output
+        if "df" in argv:
+            return 0, DISK_OK
+        return 0, started
 
     def verbs(self) -> list[str]:
         return [argv[1] for argv, _ in self.calls]
@@ -102,7 +113,9 @@ def test_a_run_is_locked_down_and_the_command_only_travels_in_the_copy(
         ["--network", "none"],
         ["--cap-drop", "ALL"],
         ["--security-opt", "no-new-privileges"],
-        ["--user", "1000:1000"],
+        ["--user", "65534:65534"],
+        ["--log-driver", "none"],
+        ["--pull=never"],
         ["--read-only"],
         ["--memory", "1g"],
         ["--pids-limit", "256"],
@@ -132,13 +145,17 @@ def test_over_ssh_every_argument_is_quoted_for_the_remote_shell(
 
 
 def test_long_output_keeps_its_end_and_timeouts_are_reported(tmp_path: Path) -> None:
-    docker = FakeDocker([("run --rm", 124, "start " + "x" * OUTPUT_LIMIT + " end")])
+    # The container returns only the tail of the output, cut in its own tmpfs.
+    docker = FakeDocker([("run --rm", 124, "x" * (OUTPUT_LIMIT - 4) + " end")])
     result = Sandbox(execute=docker).run("img", tmp_path, "sleep 999")
     assert result.timed_out
     assert result.output.startswith("[earlier output cut]")
     assert result.output.endswith(" end")
     assert result.report().startswith("The command timed out and was stopped.")
     assert SandboxResult(0, "").report() == "Exit code 0."
+    assert SandboxResult(137, "").report().startswith("The command was killed")
+    script = docker.calls[0][0][-1]
+    assert f"tail -c {OUTPUT_LIMIT} /tmp/out" in script
 
 
 def test_an_environment_is_built_once_from_the_base_then_reused(
@@ -149,10 +166,18 @@ def test_an_environment_is_built_once_from_the_base_then_reused(
     assert key is not None
     missing = FakeDocker([(f"inspect --format ok {key}", 1, "")])
     assert Sandbox(execute=missing).prepare(tmp_path) == key
-    assert missing.verbs() == ["image", "image", "rm", "run", "commit", "rm", "images"]
-    build = next(argv for argv, _ in missing.calls if argv[1] == "run")
-    assert "uv sync --locked --all-groups" in build[-1]
+    assert missing.verbs() == ["image", "image", "run", "run", "commit", "rm", "images"]
+    disk, build = (argv for argv, _ in missing.calls if argv[1] == "run")
+    assert "df" in disk
+    # Locked wheels only, as the unprivileged uid: no repository code runs here.
+    assert "uv sync --locked --all-groups --no-install-project" in build[-1]
+    assert "UV_NO_BUILD=1" in build
+    assert build[build.index("--user") + 1] == "65534:65534"
+    assert "--cap-add" not in build
+    assert "--log-driver" in build
     assert BASE_IMAGE in build
+    commit = next(argv for argv, _ in missing.calls if argv[1] == "commit")
+    assert commit[2:4] == ["--change", "LABEL agent-sandbox=env"]
     present = FakeDocker()
     assert Sandbox(execute=present).prepare(tmp_path) == key
     assert present.verbs() == ["image", "image"]
@@ -199,13 +224,18 @@ def test_a_failed_base_build_raises(tmp_path: Path) -> None:
 def test_old_environments_are_pruned_to_the_newest_three(tmp_path: Path) -> None:
     project(tmp_path)
     key = environment_key(tmp_path)
-    listing = "\n".join(f"agent-sandbox:{n}" for n in "abcde")
+    old = "2026-10-30 01:00:00 +0000 UTC"
+    new = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S +0000 UTC")
+    rows = [("a", new), ("b", old), ("c", old), ("d", old), ("e", new), ("f", old)]
+    listing = "\n".join(f"agent-sandbox:{tag}\t{when}" for tag, when in rows)
     docker = FakeDocker(
         [(f"inspect --format ok {key}", 1, ""), ("images agent-sandbox", 0, listing)]
     )
     Sandbox(execute=docker).prepare(tmp_path)
     removed = [argv[2] for argv, _ in docker.calls if argv[1] == "rmi"]
-    assert removed == ["agent-sandbox:d", "agent-sandbox:e"]
+    # Beyond the newest three, only images older than a few hours go: a recent
+    # one may still be used by a concurrent run.
+    assert removed == ["agent-sandbox:d", "agent-sandbox:f"]
 
 
 def test_checks_run_whatever_the_environment_has() -> None:
@@ -313,3 +343,44 @@ def test_the_server_entry_point_reads_its_call_from_arguments(
     )
     assert server.sandbox.host == "me@box"
     assert server.sandbox.ssh_key == tmp_path / "id"
+
+
+@pytest.mark.parametrize(
+    ("code", "output"), [(255, "ssh: connect to host"), (125, "docker: no image")]
+)
+def test_a_sandbox_fault_is_an_error_never_a_failing_command(
+    tmp_path: Path, code: int, output: str
+) -> None:
+    # ssh or docker failing prints no start marker: that's the sandbox, not the code.
+    def failing(argv: list[str], stdin: bytes, timeout: float) -> tuple[int, str]:
+        del argv, stdin, timeout
+        return code, output
+
+    with pytest.raises(SandboxError, match="could not run the command"):
+        Sandbox(execute=failing).run("img", tmp_path, "pytest")
+
+
+def test_nothing_is_built_when_the_host_is_low_on_disk(tmp_path: Path) -> None:
+    project(tmp_path)
+    key = environment_key(tmp_path)
+    low = "Filesystem 1-blocks Used Available\n/dev/sda1 9 8 1000 99% /d\n"
+    docker = FakeDocker([(f"inspect --format ok {key}", 1, ""), ("df", 0, low)])
+    with pytest.raises(SandboxError, match="low on disk"):
+        Sandbox(execute=docker).prepare(tmp_path)
+    assert "commit" not in docker.verbs()
+    assert sum(argv[1] == "run" for argv, _ in docker.calls) == 1
+
+
+def test_the_run_tool_hides_sandbox_errors_from_the_model(tmp_path: Path) -> None:
+    def broken(argv: list[str], stdin: bytes, timeout: float) -> tuple[int, str]:
+        del argv, stdin, timeout
+        return 255, "ssh: connect to host abdel@100.82.195.92 port 22: refused"
+
+    server = sandbox_mcp.Server(Sandbox(execute=broken), "img", tmp_path, None)
+    rpc(server, "initialize", {})
+    reply = rpc(server, "tools/call", {"name": "run", "arguments": {"command": "ls"}})
+    text = reply["result"]["content"][0]["text"]  # type: ignore[index]
+    assert reply["result"]["isError"] is True  # type: ignore[index]
+    assert "unavailable" in text
+    assert "100.82" not in text
+    assert "ssh" not in text
