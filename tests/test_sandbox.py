@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import shlex
 import sys
 import tarfile
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_dispatcher import sandbox_mcp
+from agent_dispatcher import sandbox, sandbox_mcp
 from agent_dispatcher.sandbox import (
     BASE_IMAGE,
     CHECKS,
@@ -22,7 +23,9 @@ from agent_dispatcher.sandbox import (
     SandboxResult,
     archive,
     byte_exec,
+    check_lock,
     environment_key,
+    program,
 )
 from agent_dispatcher.settings import Settings
 
@@ -384,3 +387,96 @@ def test_the_run_tool_hides_sandbox_errors_from_the_model(tmp_path: Path) -> Non
     assert "unavailable" in text
     assert "100.82" not in text
     assert "ssh" not in text
+
+
+def test_programs_come_from_path_never_the_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A worktree that commits ssh.exe must not be the ssh that runs.
+    planted = tmp_path / "work"
+    planted.mkdir()
+    (planted / ("ssh.exe" if os.name == "nt" else "ssh")).write_text("x")
+    real = tmp_path / "bin"
+    real.mkdir()
+    (real / ("ssh.exe" if os.name == "nt" else "ssh")).write_text("x")
+    monkeypatch.chdir(planted)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", "relative", str(real)]))
+    monkeypatch.setenv("PATHEXT", ".EXE")
+    assert Path(program("ssh")).parent == real
+    assert program(sys.executable) == sys.executable
+    monkeypatch.setenv("PATH", ".")
+    with pytest.raises(SandboxError, match="not on PATH"):
+        program("ssh")
+
+
+def lockfile(tmp_path: Path, body: str) -> Path:
+    (tmp_path / "uv.lock").write_text(body, encoding="utf-8")
+    return tmp_path
+
+
+PYPI_WHEEL = 'wheels = [{ url = "https://files.pythonhosted.org/packages/a/b/x.whl" }]'
+
+
+def test_a_lock_that_downloads_only_from_pypi_is_accepted(tmp_path: Path) -> None:
+    check_lock(
+        lockfile(
+            tmp_path,
+            '[[package]]\nname = "a"\n'
+            'source = { registry = "https://pypi.org/simple" }\n'
+            f"{PYPI_WHEEL}\n"
+            '[[package]]\nname = "me"\nsource = { editable = "." }\n',
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "package",
+    [
+        'source = { git = "http://172.17.0.1/x" }',
+        'source = { url = "http://169.254.169.254/latest" }',
+        'source = { registry = "http://172.17.0.1:8080/simple" }',
+        'source = { path = "/etc" }',
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'wheels = [{ url = "http://172.17.0.1/evil.whl" }]',
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'sdist = { url = "https://evil.example/x.tar.gz" }',
+    ],
+)
+def test_a_lock_that_reaches_anywhere_else_is_refused(
+    tmp_path: Path, package: str
+) -> None:
+    with pytest.raises(SandboxError, match="outside PyPI"):
+        check_lock(lockfile(tmp_path, f'[[package]]\nname = "a"\n{package}\n'))
+
+
+def test_a_refused_lock_builds_nothing(tmp_path: Path) -> None:
+    project(tmp_path)
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "a"\nsource = { git = "http://172.17.0.1/x" }\n',
+        encoding="utf-8",
+    )
+    key = environment_key(tmp_path)
+    docker = FakeDocker([(f"inspect --format ok {key}", 1, "")])
+    with pytest.raises(SandboxError, match="outside PyPI"):
+        Sandbox(execute=docker).prepare(tmp_path)
+    assert "run" not in docker.verbs()
+
+
+def test_an_oversized_worktree_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sandbox, "ARCHIVE_LIMIT", 1000)
+    (tmp_path / "big.bin").write_bytes(b"x" * 5000)
+    with pytest.raises(SandboxError, match="too large"):
+        archive(tmp_path)
+
+
+def test_the_runner_stops_reading_past_its_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sandbox, "CAPTURE_LIMIT", 10_000)
+    flood = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 100000)"]
+    assert byte_exec(flood, b"", 30) == (
+        1,
+        "the sandbox returned more output than allowed",
+    )
