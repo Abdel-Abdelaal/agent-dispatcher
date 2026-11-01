@@ -250,19 +250,12 @@ def test_a_run_binds_its_image_to_opencode_calls(
     assert unbound.sandbox is None
 
 
-@pytest.mark.parametrize(
-    "checks",
-    [
-        [None],  # the baseline can't run
-        [(0, "baseline ok"), None],  # the checks after implementing can't run
-    ],
-)
-def test_a_sandbox_fault_mid_run_is_never_a_failing_check(
-    tmp_path: Path, uv_origin: Path, checks: list[tuple[int, str] | None]
+def test_a_sandbox_that_never_worked_is_never_a_failing_check(
+    tmp_path: Path, uv_origin: Path
 ) -> None:
     planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
     run = checked_run(
-        tmp_path, uv_origin, (planner, worker, reviewer), ScriptedDocker(checks)
+        tmp_path, uv_origin, (planner, worker, reviewer), ScriptedDocker([None])
     )
     assert run.execute().state is State.REVIEW
     # No fix round for a failure that isn't the code's, and no false claims.
@@ -271,6 +264,24 @@ def test_a_sandbox_fault_mid_run_is_never_a_failing_check(
     assert "They also failed before the change" not in reviewer.prompts[0][0]
     assert "sandbox_unavailable" in gate_outcomes(tmp_path)
     assert run.sandbox_image is None
+
+
+def test_a_change_that_stops_the_checks_running_fails_them(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    # The baseline ran, so the change broke the sandbox (an oversized file, say):
+    # that must not switch the checks off.
+    planner, worker, reviewer = team(
+        [{"docs/api.md": "a\n"}, {"docs/api.md": "b\n"}], [APPROVE]
+    )
+    docker = ScriptedDocker([(0, "baseline ok"), None, None])
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    run.execute()
+    assert len(worker.prompts) == 2
+    assert "could not run on this change" in worker.prompts[1][0]
+    assert "could not run on this change" in reviewer.prompts[0][0]
+    assert gate_outcomes(tmp_path)[:2] == ["checks_failed", "checks_failed"]
+    assert run.sandbox_image is not None
 
 
 def test_the_reviewer_is_warned_about_weakened_checks(

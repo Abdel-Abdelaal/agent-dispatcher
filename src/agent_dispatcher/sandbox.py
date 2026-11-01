@@ -17,10 +17,14 @@ container host is local `docker`, or `sudo -n docker` over ssh when
 
 import hashlib
 import io
+import os
 import re
 import shlex
 import subprocess
 import tarfile
+import threading
+import time
+import tomllib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -50,6 +54,15 @@ BASE_IMAGE = (
 )
 COMMAND_FILE = ".agent-sandbox-command"
 OUTPUT_LIMIT = 12_000
+# The most the controller reads back from one container call.
+CAPTURE_LIMIT = 2 * 1024**2
+# The largest copy sent in; /work is a 512 MB tmpfs.
+ARCHIVE_LIMIT = 256 * 1024**2
+PYPI = "https://pypi.org/simple"
+PYPI_FILES = "https://files.pythonhosted.org/"
+_LOCAL_SOURCES = ({"editable": "."}, {"virtual": "."})
+# Programs run from here, never from a worktree.
+_TRUSTED_DIR = Path(__file__).resolve().parent
 KEEP_IMAGES = 3
 # An image this new may still be in use by a concurrent run; never prune it.
 PRUNE_AFTER = timedelta(hours=3)
@@ -163,20 +176,97 @@ class SandboxResult:
         return f"{head}\n{self.output}" if self.output else head
 
 
-def byte_exec(argv: list[str], stdin: bytes, timeout: float) -> tuple[int, str]:
-    """Run argv with binary stdin; a timeout returns 124 like `timeout(1)`.
+def program(name: str) -> str:
+    """Return the full path of `name` from PATH alone.
 
-    The container prints at most OUTPUT_LIMIT characters, so what comes back
-    here is bounded by the sandbox, not by this read.
+    Windows also looks in the current directory first, and this may run from a
+    worktree: an `ssh.exe` committed there must never be the one that runs.
     """
+    if Path(name).is_absolute():
+        return name
+    extensions = os.environ.get("PATHEXT", ".EXE").split(os.pathsep)
+    suffixes = [""] if os.name != "nt" else [ext.lower() for ext in extensions]
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if not folder or folder == os.curdir or not Path(folder).is_absolute():
+            continue
+        for suffix in suffixes:
+            candidate = Path(folder) / (name + suffix)
+            if candidate.is_file():
+                return str(candidate)
+    message = f"{name} is not on PATH"
+    raise SandboxError(message)
+
+
+def byte_exec(argv: list[str], stdin: bytes, timeout: float) -> tuple[int, str]:
+    """Run argv with binary stdin, from a fixed directory, reading a bounded reply.
+
+    A timeout returns 124 like `timeout(1)`. The container returns at most
+    OUTPUT_LIMIT characters, but a command could write past that to the
+    container's own stdout, so more than CAPTURE_LIMIT bytes stops the call.
+    """
+    process = subprocess.Popen(  # noqa: S603 - argv is built here, never from input
+        [program(argv[0]), *argv[1:]],
+        cwd=_TRUSTED_DIR,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    stdin_pipe, stdout_pipe = process.stdin, process.stdout
+    if stdin_pipe is None or stdout_pipe is None:  # pragma: no cover - PIPE is set
+        process.kill()
+        message = "could not open the pipes"
+        raise SandboxError(message)
+    output = stdout_pipe.fileno()
+
+    def feed() -> None:
+        try:
+            stdin_pipe.write(stdin)
+            stdin_pipe.close()
+        except OSError:
+            pass
+
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
+    deadline = time.monotonic() + timeout
+    chunks: list[bytes] = []
+    size = 0
+    timer = threading.Timer(timeout, process.kill)
+    timer.start()
     try:
-        done = subprocess.run(  # noqa: S603 - argv is built here, never from input
-            argv, input=stdin, capture_output=True, timeout=timeout, check=False
-        )
+        while chunk := os.read(output, 65_536):
+            size += len(chunk)
+            if size > CAPTURE_LIMIT:
+                process.kill()
+                return 1, "the sandbox returned more output than allowed"
+            chunks.append(chunk)
+        process.wait(timeout=max(1.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
+        process.kill()
+    finally:
+        timer.cancel()
+    if time.monotonic() >= deadline:
         return 124, f"timed out after {timeout:.0f}s"
-    output = done.stdout + done.stderr
-    return done.returncode, output.decode("utf-8", errors="replace")
+    return process.returncode, b"".join(chunks).decode("utf-8", errors="replace")
+
+
+def check_lock(base: Path) -> None:
+    """Refuse a lockfile that would download from anywhere but PyPI.
+
+    uv fetches exactly the URLs a lockfile names, during the one step with
+    network, so a lockfile pointing elsewhere could reach the host's services.
+    """
+    lock = tomllib.loads((base / "uv.lock").read_text(encoding="utf-8"))
+    for package in lock.get("package", []):
+        source = package.get("source", {})
+        if source not in _LOCAL_SOURCES and source != {"registry": PYPI}:
+            message = f"uv.lock installs {package.get('name')} from outside PyPI"
+            raise SandboxError(message)
+        files = [package.get("sdist", {}), *package.get("wheels", [])]
+        for file in files:
+            url = file.get("url")
+            if url is not None and not str(url).startswith(PYPI_FILES):
+                message = f"uv.lock downloads {package.get('name')} from outside PyPI"
+                raise SandboxError(message)
 
 
 def _skipped(path: PurePosixPath) -> bool:
@@ -204,6 +294,9 @@ def archive(worktree: Path, extra: dict[str, str] | None = None) -> bytes:
             info = tarfile.TarInfo(str(relative))
             info.size, info.mode = len(data), 0o644
             tar.addfile(info, io.BytesIO(data))
+            if buffer.tell() > ARCHIVE_LIMIT:
+                message = "the worktree is too large for the sandbox"
+                raise SandboxError(message)
     return buffer.getvalue()
 
 
@@ -340,6 +433,7 @@ class Sandbox:
             return BASE_IMAGE
         if self._exists(key):
             return key
+        check_lock(base)
         self._check_disk(BASE_IMAGE)
         name = f"agent-sandbox-build-{uuid.uuid4().hex}"
         install = (

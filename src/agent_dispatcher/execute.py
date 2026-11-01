@@ -88,6 +88,10 @@ The repository's own checks (lint, types, tests) failed on your change; their
 output is below. Fix the cause and change nothing else. Never weaken, skip or
 delete a test or check to make it pass.
 """
+CHECKS_BROKEN = (
+    "The checks could not run on this change, though they ran on the code before "
+    "it. Something in the change stops them (for example a very large file)."
+)
 CHECKS_RESULT = """
 The controller ran the repository's own checks (lint, types, tests) on this
 change in a sandbox; their output is below. Reject a change whose checks fail
@@ -951,8 +955,12 @@ class Run:
             try:
                 self.checks = self.sandbox.run(self.sandbox_image, clone, CHECKS)
             except (SandboxError, OSError) as error:
-                self._sandbox_lost(error)
-                return
+                if self.baseline is None:
+                    self._sandbox_lost(error)
+                    return
+                # It ran on the unedited code, so the change is what broke it
+                # (an oversized file, say): that's a failed check, not a pass.
+                self.checks = SandboxResult(1, CHECKS_BROKEN)
             passed = self.checks.exit_code == 0
             self._record(
                 "gate",
