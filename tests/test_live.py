@@ -381,7 +381,10 @@ def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> 
     assert "+# API" in reviewer.prompts[0][0]
     # Context the controller already has goes in, so no call spends steps on it.
     for model in (planner, worker, reviewer):
-        assert "This repository has no AGENTS.md." in model.prompts[0][0]
+        assert (
+            "This repository has no AGENTS.md, so there are no extra rules."
+            in model.prompts[0][0]
+        )
         assert f"at most {model.turns[0]} tool steps" in model.prompts[0][0]
     assert (
         "<<<FILE docs/api.md>>>\n# API\n<<<END_FILE docs/api.md>>>"
