@@ -34,6 +34,7 @@ from agent_dispatcher.publish import GitHubWriter, PublishError
 from agent_dispatcher.queue import RunQueue, RunRecord, Task
 from agent_dispatcher.quota import Quota
 from agent_dispatcher.roles import THINKERS, WORKERS, Roster, Team
+from agent_dispatcher.sandbox import Sandbox
 from agent_dispatcher.settings import BUILT_IN_PROVIDERS, Settings
 from agent_dispatcher.states import State, state_of
 from agent_dispatcher.supervisor import cycle as supervised_cycle
@@ -268,10 +269,21 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         skip_easy_docs_plan=settings.skip_plan_for_easy_docs,
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
+        sandbox=sandbox(settings),
         authorize=lambda original, expected: GitHubReader(
             client,
             settings.github_token.get_secret_value() if settings.github_token else None,
         ).authorized_task(original, settings.owner, expected),
+    )
+
+
+def sandbox(settings: Settings) -> Sandbox | None:
+    """Return the configured sandbox, or None when it's off."""
+    if settings.sandbox == "off":
+        return None
+    return Sandbox(
+        host=settings.sandbox_host if settings.sandbox == "ssh" else None,
+        ssh_key=settings.sandbox_ssh_key,
     )
 
 

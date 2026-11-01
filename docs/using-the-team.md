@@ -203,9 +203,11 @@ attest hosted ingestion of controller reports, not independent local execution.
 Telemetry retains hashes, sizes and bounded scrubbed excerpts. Unknown usage
 stays unknown; a record is not necessarily a successful task.
 
-Workers currently read, search and edit files. The controller handles GitHub and
-CI runs tests after publication. Workers have no general shell, browser, deploy
-or arbitrary MCP access. Local execution is not an operating-system sandbox.
+Workers read, search and edit files. With the [sandbox](sandbox.md) on, OpenCode
+calls can also run the project's tests, linter and type checker in a locked-down
+container, and the controller runs those checks itself before review. The
+controller handles GitHub. Workers have no shell on the controller's host, and no
+browser, deploy or arbitrary MCP access.
 Changes needing browser verification, migrations, deployments or protected
 configuration require a separately reviewed execution path. Do not grant broad
 tools or credentials merely to avoid a refusal.

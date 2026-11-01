@@ -94,6 +94,7 @@ providers of their role. See [extra providers](docs/extra-providers.md).
 | MiMo (triage, implement) through Claude Code | built, harness live-tested |
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | Extra providers (any OpenAI-compatible API) through OpenCode | built, tested with fakes |
+| [Sandbox](docs/sandbox.md): models run tests in locked-down containers; checks before review | built, tested with fakes and by hand on the VPS |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ### Keeping token use down

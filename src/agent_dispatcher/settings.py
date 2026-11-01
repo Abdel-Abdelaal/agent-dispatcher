@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SecretStr,
+    model_validator,
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
@@ -157,3 +158,20 @@ class Settings(BaseSettings):
     extra_providers: Annotated[list[ExtraProvider], AfterValidator(_unique_names)] = (
         Field(default_factory=list[ExtraProvider])
     )
+    # Run model-requested commands and the repository's own checks in a
+    # locked-down container (see sandbox.py): off, local docker, or docker on
+    # sandbox_host over ssh.
+    sandbox: Literal["off", "local", "ssh"] = "off"
+    sandbox_host: Annotated[str | None, BeforeValidator(_empty_is_none)] = Field(
+        default=None, pattern=r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:-]+$"
+    )
+    sandbox_ssh_key: Annotated[
+        Path | None, BeforeValidator(_empty_is_none), AfterValidator(_absolute)
+    ] = None
+
+    @model_validator(mode="after")
+    def _sandbox_needs_a_host(self) -> "Settings":
+        if self.sandbox == "ssh" and self.sandbox_host is None:
+            message = "sandbox=ssh needs sandbox_host, as user@host"
+            raise ValueError(message)
+        return self

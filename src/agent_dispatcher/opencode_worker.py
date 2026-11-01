@@ -5,6 +5,7 @@ MiMo was the first; an extra provider is the same harness with its own endpoint.
 
 import json
 import os
+import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -76,6 +77,46 @@ def steps_taken(output: str) -> int:
 
 
 @dataclass(frozen=True)
+class SandboxCall:
+    """A prepared sandbox image that one call's `run` tool executes commands in."""
+
+    image: str
+    host: str | None = None
+    ssh_key: Path | None = None
+    log: Path | None = None
+
+    def server(self, worktree: Path) -> dict[str, object]:
+        """Return OpenCode's config for the call's local sandbox MCP server."""
+        args = ["--image", self.image, "--worktree", str(worktree)]
+        if self.host is not None:
+            args += ["--host", self.host]
+        if self.ssh_key is not None:
+            args += ["--key", str(self.ssh_key)]
+        if self.log is not None:
+            args += ["--log", str(self.log)]
+        return {
+            "type": "local",
+            "enabled": True,
+            # -P and PYTHONSAFEPATH: OpenCode starts this in the worktree, and
+            # Python would otherwise import a planted json.py from there, running
+            # model-written code on this host.
+            "command": [
+                sys.executable,
+                "-P",
+                "-m",
+                "agent_dispatcher.sandbox_mcp",
+                *args,
+            ],
+            "environment": {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                "PYTHONSAFEPATH": "1",
+            },
+            # A run waits for its container: a 300 s command plus the copy.
+            "timeout": 420_000,
+        }
+
+
+@dataclass(frozen=True)
 class OpenCodeWorker:
     """One model behind the same controller gates, explicit limits, ephemeral state.
 
@@ -93,6 +134,7 @@ class OpenCodeWorker:
     checkpoint_root: Path | None = None
     binding: native_evidence.CallBinding | None = None
     candidate_snapshot: Callable[[], str] | None = None
+    sandbox: SandboxCall | None = None
 
     def __post_init__(self) -> None:
         """Refuse a snapshot callback that cannot retain its receipt."""
@@ -124,8 +166,14 @@ class OpenCodeWorker:
             errors.append("receipt_storage_error")
         return tuple(errors)
 
-    def config(self, *, read_only: bool, steps: int) -> str:
-        """Deny ambient tools and project configuration; no shell or outside reads."""
+    def config(
+        self, *, read_only: bool, steps: int, worktree: Path | None = None
+    ) -> str:
+        """Deny ambient tools and project configuration; no shell or outside reads.
+
+        With a sandbox, the one extra tool runs commands in its container, never
+        on this host.
+        """
         config = cast(
             "dict[str, Any]",
             json.loads(
@@ -159,6 +207,9 @@ class OpenCodeWorker:
             formatter=False,
             compaction={"auto": True, "prune": True},
         )
+        if self.sandbox is not None and worktree is not None:
+            config["mcp"] = {"sandbox": self.sandbox.server(worktree)}
+            config["permission"]["sandbox_run"] = "allow"
         model = config["provider"]["worker"]["models"][self.model]
         model.update(
             mimo_native_model(self.reasoning)
@@ -230,7 +281,7 @@ class OpenCodeWorker:
         environ: Mapping[str, str] | None,
         fork: tuple[Path, str] | None = None,
     ) -> RunResult:
-        config = self.config(read_only=read_only, steps=steps)
+        config = self.config(read_only=read_only, steps=steps, worktree=worktree)
         retention_errors: tuple[str, ...] = ()
         with tempfile.TemporaryDirectory(prefix=f"{self.name}-opencode-") as tmp:
             root = Path(tmp)
@@ -282,9 +333,16 @@ class OpenCodeWorker:
                 "--file",
                 str(task),
                 "--",
-                "Do the task in the attached file. Use only available file tools. "
-                "CI runs tests; do not attempt shell commands. "
-                "Finish with the requested answer once the file work is complete.",
+                "Do the task in the attached file. "
+                + (
+                    "Edit with the file tools. Run the project's tests, linter and "
+                    "type checker with the sandbox run tool, the only shell you "
+                    "have, and fix what fails before you finish. "
+                    if self.sandbox is not None
+                    else "Use only available file tools. "
+                    "CI runs tests; do not attempt shell commands. "
+                )
+                + "Finish with the requested answer once the file work is complete.",
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
             if fork is not None or self.checkpoint_root is not None:
