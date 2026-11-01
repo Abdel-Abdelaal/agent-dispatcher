@@ -20,9 +20,12 @@ pass on its change.
 | `pw-thinking-switch` | platform-workflows | 1 file, 38 lines |
 | `pw-security-update-type` | platform-workflows | 1 file, 31 lines |
 | `sh-head-metadata` | shortlink | 4 files, 82 lines |
+| `pw-agent-privacy-metadata` | platform-workflows | 2 files, 54 lines |
+| `pw-provider-key-redaction` | platform-workflows | 2 files, 58 lines |
+| `pw-analysis-budget-retries` | platform-workflows | 2 files, 93 lines |
 
 The first four use the audit issue each fix closed, word for word: the same
-input the team got in production. The other six have written statements that
+input the team got in production. The other nine have written statements that
 describe the problem and the interface their tests use (names, arguments,
 exact values), never the implementation, as SWE-bench Verified requires.
 
