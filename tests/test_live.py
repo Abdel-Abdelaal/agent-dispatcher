@@ -618,6 +618,52 @@ def test_review_format_retry_is_read_only_not_a_code_repair(
     assert len(reviewer.prompts) == 2
     assert all(read_only for _, read_only in reviewer.prompts)
     assert "exactly one valid JSON" in reviewer.prompts[1][0]
+    # The retry turns its own notes into a verdict in a few steps, not a new review.
+    assert "<<<PRIOR_REVIEW>>>\nbad\n<<<END_PRIOR_REVIEW>>>" in reviewer.prompts[1][0]
+    assert reviewer.turns[1] == 3
+    assert reviewer.turns[0] != 3
+
+
+class StepCapped(FakeModel):
+    """Stops at its cap with a final reply, as OpenCode does, or with none."""
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        result = super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        return replace(result, exit_code=1, stop_reason="max_turns")
+
+
+def test_a_reader_capped_with_a_reply_keeps_it(tmp_path: Path, origin: Path) -> None:
+    planner = StepCapped("claude", ["1. Add docs/api.md"])
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert "1. Add docs/api.md" in worker.prompts[0][0]
+    assert "claude reached its step cap while planning; its final reply is used." in (
+        run.notes
+    )
+
+
+def test_a_reader_capped_with_no_reply_stops(tmp_path: Path, origin: Path) -> None:
+    planner = StepCapped("claude", [""])
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    outcome = team_run(
+        tmp_path, origin, (planner, worker, reviewer), FakeGh()
+    ).execute()
+    assert outcome.state is State.FAILED
+    assert "read-only turn cap" in outcome.detail
+    assert worker.prompts == []
 
 
 def test_two_invalid_review_verdicts_fail_without_publication(
@@ -1537,6 +1583,9 @@ def test_running_out_of_turns_raises_the_level_and_continues(
     run.telemetry = Telemetry(tmp_path / "telemetry")
     assert run.execute().state is State.REVIEW
     assert worker.turns == [15, 25]
+    # The continued call is told its earlier edits are already on disk.
+    assert "An earlier call ran out of steps" not in worker.prompts[0][0]
+    assert "An earlier call ran out of steps" in worker.prompts[1][0]
     assert run.level is Level.MEDIUM
     assert (
         "mimo ran out of turns while implementing, so it continued at medium."
