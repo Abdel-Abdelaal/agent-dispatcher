@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from agent_dispatcher.sandbox import Sandbox
+from agent_dispatcher.sandbox import Sandbox, SandboxError
 
 MAX_LINE = 64_000
 MAX_COMMAND = 4_000
@@ -61,7 +61,14 @@ class Server:
         if len(command) > MAX_COMMAND:
             return _text("The command is too long.", error=True)
         started = time.monotonic()
-        result = self.sandbox.run(self.image, self.worktree, command)
+        try:
+            result = self.sandbox.run(self.image, self.worktree, command)
+        except (SandboxError, OSError):
+            # Never echo ssh or docker errors: they name hosts and key paths.
+            return _text(
+                "The sandbox is unavailable right now; carry on without it.",
+                error=True,
+            )
         if self.log is not None:
             with self.log.open("a", encoding="utf-8") as file:
                 file.write(

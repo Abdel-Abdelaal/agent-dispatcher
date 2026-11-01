@@ -7,17 +7,21 @@ import pytest
 from pydantic import SecretStr
 
 from agent_dispatcher.opencode_worker import OpenCodeWorker, SandboxCall
-from agent_dispatcher.sandbox import Sandbox
+from agent_dispatcher.sandbox import STARTED, Sandbox
 from agent_dispatcher.states import State
 from agent_dispatcher.telemetry import Telemetry
 from test_live import APPROVE, FakeGh, FakeModel, git, team_run
 
 
 class ScriptedDocker:
-    """Answers check runs in order; every other docker call succeeds."""
+    """Answers check runs in order; every other docker call succeeds.
+
+    A check scripted as None is a sandbox fault: no start marker, as when ssh
+    or docker fails.
+    """
 
     def __init__(
-        self, checks: list[tuple[int, str]], *, prepare_fails: bool = False
+        self, checks: list[tuple[int, str] | None], *, prepare_fails: bool = False
     ) -> None:
         self.checks = checks
         self.prepare_fails = prepare_fails
@@ -29,11 +33,14 @@ class ScriptedDocker:
         del stdin, timeout
         if argv[1:3] == ["image", "inspect"]:
             return (1, "") if self.prepare_fails else (0, "ok")
-        if argv[1:3] == ["build", "--pull=false"]:
+        if argv[1:3] == ["build", "-t"]:
             return 1, "no space left on device"
         if argv[1:3] == ["run", "--rm"]:
             self.runs += 1
-            return self.checks.pop(0)
+            check = self.checks.pop(0)
+            if check is None:
+                return 255, "ssh: connect to host box port 22: refused"
+            return check[0], f"{STARTED}\n{check[1]}"
         return 0, ""
 
 
@@ -194,8 +201,8 @@ def test_an_opencode_call_gets_the_run_tool_and_is_told_to_use_it(
     config = json.loads(worker.config(read_only=False, steps=5, worktree=tmp_path))
     server = config["mcp"]["sandbox"]
     assert server["type"] == "local"
-    assert server["command"][1:3] == ["-m", "agent_dispatcher.sandbox_mcp"]
-    args = server["command"][3:]
+    assert server["command"][1:4] == ["-P", "-m", "agent_dispatcher.sandbox_mcp"]
+    args = server["command"][4:]
     assert args[args.index("--image") + 1] == "agent-sandbox:abc"
     assert args[args.index("--worktree") + 1] == str(tmp_path)
     assert args[args.index("--host") + 1] == "me@box"
@@ -241,3 +248,45 @@ def test_a_run_binds_its_image_to_opencode_calls(
     unbound = run._bound_provider("mimo", "implement", clone)  # pyright: ignore[reportPrivateUsage]
     assert isinstance(unbound, OpenCodeWorker)
     assert unbound.sandbox is None
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        [None],  # the baseline can't run
+        [(0, "baseline ok"), None],  # the checks after implementing can't run
+    ],
+)
+def test_a_sandbox_fault_mid_run_is_never_a_failing_check(
+    tmp_path: Path, uv_origin: Path, checks: list[tuple[int, str] | None]
+) -> None:
+    planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
+    run = checked_run(
+        tmp_path, uv_origin, (planner, worker, reviewer), ScriptedDocker(checks)
+    )
+    assert run.execute().state is State.REVIEW
+    # No fix round for a failure that isn't the code's, and no false claims.
+    assert len(worker.prompts) == 1
+    assert "<<<CHECKS>>>" not in reviewer.prompts[0][0]
+    assert "They also failed before the change" not in reviewer.prompts[0][0]
+    assert "sandbox_unavailable" in gate_outcomes(tmp_path)
+    assert run.sandbox_image is None
+
+
+def test_the_reviewer_is_warned_about_weakened_checks(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
+    docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
+    checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker).execute()
+    assert "conftest.py or tool settings" in reviewer.prompts[0][0]
+
+
+def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(
+    tmp_path: Path,
+) -> None:
+    worker = OpenCodeWorker(SecretStr("k"), sandbox=SandboxCall("img"))
+    config = json.loads(worker.config(read_only=False, steps=5, worktree=tmp_path))
+    server = config["mcp"]["sandbox"]
+    assert server["command"][1:4] == ["-P", "-m", "agent_dispatcher.sandbox_mcp"]
+    assert server["environment"]["PYTHONSAFEPATH"] == "1"

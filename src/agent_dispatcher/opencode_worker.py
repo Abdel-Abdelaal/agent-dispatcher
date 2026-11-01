@@ -97,8 +97,20 @@ class SandboxCall:
         return {
             "type": "local",
             "enabled": True,
-            "command": [sys.executable, "-m", "agent_dispatcher.sandbox_mcp", *args],
-            "environment": {"PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+            # -P and PYTHONSAFEPATH: OpenCode starts this in the worktree, and
+            # Python would otherwise import a planted json.py from there, running
+            # model-written code on this host.
+            "command": [
+                sys.executable,
+                "-P",
+                "-m",
+                "agent_dispatcher.sandbox_mcp",
+                *args,
+            ],
+            "environment": {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+                "PYTHONSAFEPATH": "1",
+            },
             # A run waits for its container: a 300 s command plus the copy.
             "timeout": 420_000,
         }

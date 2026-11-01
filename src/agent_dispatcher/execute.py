@@ -91,7 +91,8 @@ delete a test or check to make it pass.
 CHECKS_RESULT = """
 The controller ran the repository's own checks (lint, types, tests) on this
 change in a sandbox; their output is below. Reject a change whose checks fail
-because of it.
+because of it. Checks can be made to pass by weakening them, so reject any
+change to tests, conftest.py or tool settings that the issue doesn't call for.
 """
 CONTINUED = """
 An earlier call ran out of steps on this task. Its edits are already in the files:
@@ -916,22 +917,22 @@ class Run:
             return
         try:
             self.sandbox_image = self.sandbox.prepare(clone)
+            if environment_key(clone) is not None:
+                # Checks that already fail before any edit aren't the worker's.
+                self.baseline = self.sandbox.run(self.sandbox_image, clone, CHECKS)
         except (SandboxError, OSError) as error:
-            reason = (str(error).splitlines() or [type(error).__name__])[0]
-            self.notes.append(
-                f"Sandbox unavailable, so the run has no checks: {reason}"
-            )
-            self._record(
-                "gate", "controller", outcome="sandbox_unavailable", reason=reason
-            )
+            self._sandbox_lost(error)
             return
-        if environment_key(clone) is not None:
-            # Checks that already fail before any edit aren't the worker's to fix.
-            self.baseline = self.sandbox.run(self.sandbox_image, clone, CHECKS)
-            if self.baseline.exit_code != 0:
-                self.notes.append(
-                    "The repository's checks already fail before any change."
-                )
+        if self.baseline is not None and self.baseline.exit_code != 0:
+            self.notes.append("The repository's checks already fail before any change.")
+
+    def _sandbox_lost(self, error: Exception) -> None:
+        """Go on without the sandbox: a fault there is never a failing check."""
+        reason = (str(error).splitlines() or [type(error).__name__])[0]
+        self.sandbox_image = None
+        self.baseline = self.checks = None
+        self.notes.append(f"Sandbox unavailable, so the run has no checks: {reason}")
+        self._record("gate", "controller", outcome="sandbox_unavailable", reason=reason)
 
     def _verify(self, clone: Path, plan: str) -> None:
         """Run the repository's own checks; on failure the worker fixes them once.
@@ -947,7 +948,11 @@ class Run:
             return
         baseline_failed = self.baseline is not None and self.baseline.exit_code != 0
         for fixes_left in range(CHECK_FIXES, -1, -1):
-            self.checks = self.sandbox.run(self.sandbox_image, clone, CHECKS)
+            try:
+                self.checks = self.sandbox.run(self.sandbox_image, clone, CHECKS)
+            except (SandboxError, OSError) as error:
+                self._sandbox_lost(error)
+                return
             passed = self.checks.exit_code == 0
             self._record(
                 "gate",
