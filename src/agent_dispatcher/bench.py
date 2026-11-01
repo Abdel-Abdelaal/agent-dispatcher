@@ -185,10 +185,20 @@ def usage(directory: Path, run_id: int) -> dict[str, int]:
     return totals
 
 
-def attempt(
-    task: BenchTask, settings: Settings, root: Path, run_id: int
+def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
+    task: BenchTask,
+    settings: Settings,
+    root: Path,
+    run_id: int,
+    grader: Sandbox,
+    *,
+    team_sandbox: bool = True,
 ) -> dict[str, object]:
-    """Run the production team on one task offline, then grade what it published."""
+    """Run the production team on one task offline, then grade what it published.
+
+    With `team_sandbox` off the team works as it did before the sandbox: no run
+    tool, no checks. Grading always runs in `grader`.
+    """
     remote = local_remote(task, root)
     issue = Issue(
         task.repo,
@@ -219,6 +229,8 @@ def attempt(
         run.writer = GitHubWriter(offline_gh, {}, work)
         run.authorize = lambda _issue, _expected: True
         run.telemetry = replace(cli.telemetry(settings), directory=root / "telemetry")
+        if not team_sandbox:
+            run.sandbox = None
         started = time.monotonic()
         outcome = run.execute()
         seconds = round(time.monotonic() - started)
@@ -232,13 +244,13 @@ def attempt(
         shutil.copytree(work / f"run-{run_id}-agent", tree)
     fix = checkout(task, root, fixed=True)
     hidden_tests(task, fix, tree)
-    sandbox = run.sandbox or Sandbox()
-    image = run.sandbox_image or sandbox.prepare(checkout(task, root, fixed=False))
-    graded = run_tests(sandbox, image, tree, task)
+    image = run.sandbox_image or grader.prepare(checkout(task, root, fixed=False))
+    graded = run_tests(grader, image, tree, task)
     return {
         "id": task.id,
         "run_id": run_id,
         "team": [team.planner, team.worker, team.reviewer],
+        "team_sandbox": team_sandbox,
         "outcome": outcome.state.value,
         "published": published,
         "hidden_tests_pass": graded.exit_code == 0,
@@ -257,6 +269,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--only", nargs="*", default=None)
     parser.add_argument("--first-run-id", type=int, default=90_000)
+    parser.add_argument(
+        "--team-sandbox",
+        choices=["on", "off"],
+        default="on",
+        help="off measures the team without the run tool and checks",
+    )
     arguments = parser.parse_args(argv)
     settings = load_settings(CHECKOUT / ".env")
     tasks = [
@@ -276,7 +294,14 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.command == "validate":
             result = validate(task, sandbox, root)
         else:
-            result = attempt(task, settings, root, arguments.first_run_id + index)
+            result = attempt(
+                task,
+                settings,
+                root,
+                arguments.first_run_id + index,
+                sandbox,
+                team_sandbox=arguments.team_sandbox == "on",
+            )
         results.append(result)
         sys.stdout.write(json.dumps(result) + "\n")
         sys.stdout.flush()

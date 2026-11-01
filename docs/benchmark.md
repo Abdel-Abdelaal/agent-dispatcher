@@ -42,6 +42,11 @@ budgets and sandbox. It needs the sandbox, because grading runs there.
 .\.venv\Scripts\python.exe -m agent_dispatcher.bench run --root D:\showcase\work\benchdata
 ```
 
+To compare with the team as it worked before the sandbox, add
+`--team-sandbox off`: the team gets no run tool and no checks, and grading still
+runs in the sandbox. Give each run its own `--first-run-id` range (for example
+91000 and 92000) so their telemetry never mixes.
+
 Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.
