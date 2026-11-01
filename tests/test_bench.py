@@ -19,7 +19,7 @@ from agent_dispatcher.bench import (
     usage,
     validate,
 )
-from agent_dispatcher.sandbox import Sandbox
+from agent_dispatcher.sandbox import STARTED, Sandbox
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -153,7 +153,9 @@ class GradingDocker:
     ) -> tuple[int, str]:
         del timeout
         if argv[1:3] == ["run", "--rm"]:
-            return (1, "1 failed") if b"a - b" in stdin else (0, "1 passed")
+            if b"a - b" in stdin:
+                return 1, f"{STARTED}\n1 failed"
+            return 0, f"{STARTED}\n1 passed"
         return 0, "ok"
 
 
