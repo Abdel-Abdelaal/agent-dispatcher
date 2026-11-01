@@ -31,8 +31,8 @@ UPSTREAM_IMAGE = (
 DOCKERFILE = f"""\
 FROM {UPSTREAM_IMAGE}
 RUN apt-get update \\
- && apt-get install -y --no-install-recommends nodejs git \\
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends nodejs git \\
+    && rm -rf /var/lib/apt/lists/*
 """
 BASE_IMAGE = (
     "agent-sandbox-base:" + hashlib.sha256(DOCKERFILE.encode()).hexdigest()[:24]
@@ -232,6 +232,13 @@ class Sandbox:
         if code != 0:
             message = f"base image build failed:\n{output[-2000:]}"
             raise SandboxError(message)
+        # A changed DOCKERFILE leaves the old base behind; remove it.
+        code, output = self._docker(
+            "images", "agent-sandbox-base", "--format", "{{.Repository}}:{{.Tag}}"
+        )
+        for image in output.split() if code == 0 else []:
+            if image != BASE_IMAGE:
+                self._docker("rmi", image)
 
     def prepare(self, base: Path) -> str:
         """Return an image holding this lockfile's dependencies, building it once.

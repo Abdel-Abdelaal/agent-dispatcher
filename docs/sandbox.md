@@ -7,21 +7,21 @@ writes ever runs on the controller's host, because that host holds credentials.
 ## How it works
 
 1. **Prepare, once per lockfile.** From the task's unedited clone, the controller
-   builds an image with the repository's locked dependencies
-   (`uv sync --locked --all-groups`). This is the only step with network, and it
-   uses the lockfile the repository already trusts, never a model's edits. The
-   image is named by a hash of `pyproject.toml` and `uv.lock`, so later tasks on
-   the same lockfile reuse it. Only the newest three are kept.
+    builds an image with the repository's locked dependencies
+    (`uv sync --locked --all-groups`). This is the only step with network, and it
+    uses the lockfile the repository already trusts, never a model's edits. The
+    image is named by a hash of `pyproject.toml` and `uv.lock`, so later tasks on
+    the same lockfile reuse it. Only the newest three are kept.
 2. **Baseline.** The controller runs the checks once before any edit. If they
-   already fail, the worker isn't asked to fix them, and the reviewer is told.
+    already fail, the worker isn't asked to fix them, and the reviewer is told.
 3. **The `run` tool.** OpenCode calls get one extra tool, `sandbox_run`. The
-   model sends a shell command. The worktree is copied into a fresh container,
-   the command runs there, and the end of its output comes back. Files the
-   command writes are thrown away; only edits made with the file tools count.
+    model sends a shell command. The worktree is copied into a fresh container,
+    the command runs there, and the end of its output comes back. Files the
+    command writes are thrown away; only edits made with the file tools count.
 4. **Checks before review.** After implementing, the controller runs the
-   repository's checks (`ruff check .`, `pyright` and `pytest`, whichever the
-   environment has). If they fail, the worker gets the output and one round to
-   fix the cause. The reviewer sees the final result.
+    repository's checks (`ruff check .`, `pyright` and `pytest`, whichever the
+    environment has). If they fail, the worker gets the output and one round to
+    fix the cause. The reviewer sees the final result.
 
 ## The container
 

@@ -174,6 +174,20 @@ def test_a_failed_install_raises_and_removes_its_container(tmp_path: Path) -> No
     assert "commit" not in docker.verbs()
 
 
+def test_a_new_base_replaces_the_old_one(tmp_path: Path) -> None:
+    listing = f"{BASE_IMAGE}\nagent-sandbox-base:old"
+    docker = FakeDocker(
+        [
+            (f"inspect --format ok {BASE_IMAGE}", 1, ""),
+            ("images agent-sandbox-base", 0, listing),
+        ]
+    )
+    Sandbox(execute=docker).prepare(tmp_path)
+    assert "build" in docker.verbs()
+    removed = [argv[2] for argv, _ in docker.calls if argv[1] == "rmi"]
+    assert removed == ["agent-sandbox-base:old"]
+
+
 def test_a_failed_base_build_raises(tmp_path: Path) -> None:
     docker = FakeDocker(
         [(f"inspect --format ok {BASE_IMAGE}", 1, ""), ("build", 1, "x")]
