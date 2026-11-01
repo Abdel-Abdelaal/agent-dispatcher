@@ -38,7 +38,7 @@ DEFAULT_LADDER: dict[str, dict[str, tuple[str, str]]] = {
     },
 }
 # Agent turns allowed per level, as (thinking, working). Easy tasks can't wander;
-# hard ones keep room to explore. Only Claude Code's harness enforces a turn cap.
+# hard ones keep room to explore. Claude Code and OpenCode enforce the cap.
 TURNS: dict[str, tuple[int, int]] = {
     "easy": (10, 15),
     "medium": (15, 25),

@@ -379,6 +379,17 @@ def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> 
     assert "1. Add docs/api.md" in worker.prompts[0][0]
     assert "<<<UNTRUSTED_ISSUE>>>" in worker.prompts[0][0]
     assert "+# API" in reviewer.prompts[0][0]
+    # Context the controller already has goes in, so no call spends steps on it.
+    for model in (planner, worker, reviewer):
+        assert (
+            "This repository has no AGENTS.md, so there are no extra rules."
+            in model.prompts[0][0]
+        )
+        assert f"at most {model.turns[0]} tool steps" in model.prompts[0][0]
+    assert (
+        "<<<FILE docs/api.md>>>\n# API\n<<<END_FILE docs/api.md>>>"
+        in (reviewer.prompts[0][0])
+    )
     message = git(origin, "log", "-1", "--format=%B", "agent/7-run-3")
     assert message.startswith("docs: document the API\n\nCloses #7")
     assert "Agent-Planner: claude\nAgent-Worker: mimo\nAgent-Reviewer: codex" in message
