@@ -40,6 +40,11 @@ BASE_IMAGE = (
 COMMAND_FILE = ".agent-sandbox-command"
 OUTPUT_LIMIT = 12_000
 KEEP_IMAGES = 3
+SNAPSHOT = (
+    "git init -q && git add -A && "
+    "git -c user.name=sandbox -c user.email=sandbox@localhost "
+    "commit -q --no-verify -m snapshot"
+)
 # The repository's own checks, whichever its environment has installed.
 CHECKS = (
     "status=0; "
@@ -297,8 +302,11 @@ class Sandbox:
     def run(self, image: str, worktree: Path, command: str) -> SandboxResult:
         """Run `command` in a fresh locked-down container over a copy of `worktree`."""
         stream = archive(worktree, {COMMAND_FILE: command + "\n"})
+        # The copy has no .git, so some tests' git calls would fail: give them a
+        # one-commit repository of the copied files, with no history or remote.
         script = (
-            f"tar -x -C /work && exec timeout -k 5 {self.timeout} sh {COMMAND_FILE}"
+            f"tar -x -C /work && {{ {SNAPSHOT}; }} >/dev/null 2>&1; "
+            f"exec timeout -k 5 {self.timeout} sh {COMMAND_FILE}"
         )
         code, output = self._docker(
             "run",
