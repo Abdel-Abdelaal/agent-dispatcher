@@ -521,6 +521,17 @@ def test_the_run_tool_logs_why_the_sandbox_failed_but_never_tells_the_model(
     assert entry["outcome"] == "unavailable"
     assert entry["error"] == "SandboxError"
     assert entry["reason"] == "the sandbox could not run the command"
+    # What ssh said stays in the local log, for diagnosis.
+    assert (
+        entry["detail"]
+        == "exit 255: ssh: connect to host 100.82.195.92 port 22: refused"
+    )
+
+
+def test_a_failure_detail_is_bounded() -> None:
+    error = SandboxError("failed", "x" * 5000)
+    assert len(error.detail) == sandbox.DETAIL_LIMIT
+    assert str(error) == "failed"
 
 
 def test_the_server_entry_point_passes_the_client(

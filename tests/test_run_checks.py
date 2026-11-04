@@ -307,6 +307,7 @@ def test_the_run_tool_server_gets_the_client_and_what_windows_needs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("PROGRAMDATA", r"C:\ProgramData")
     monkeypatch.setenv("GH_TOKEN", "held-secret")
     call = SandboxCall("img", "me@box", None, None, "C:/tools/ssh.exe")
     server = json.loads(json.dumps(call.server(tmp_path)))
@@ -314,6 +315,8 @@ def test_the_run_tool_server_gets_the_client_and_what_windows_needs(
     assert args[args.index("--client") + 1] == "C:/tools/ssh.exe"
     environment: dict[str, str] = server["environment"]
     assert environment["SYSTEMROOT"] == r"C:\Windows"
+    # Windows' ssh.exe exits 255, silently, without it (2026-11-04 benchmark).
+    assert environment["PROGRAMDATA"] == r"C:\ProgramData"
     assert "GH_TOKEN" not in environment
     assert environment["PYTHONSAFEPATH"] == "1"
 
