@@ -34,7 +34,7 @@ from agent_dispatcher.publish import GitHubWriter, PublishError
 from agent_dispatcher.queue import RunQueue, RunRecord, Task
 from agent_dispatcher.quota import Quota
 from agent_dispatcher.roles import THINKERS, WORKERS, Roster, Team
-from agent_dispatcher.sandbox import Sandbox
+from agent_dispatcher.sandbox import Sandbox, SandboxError
 from agent_dispatcher.settings import BUILT_IN_PROVIDERS, Settings
 from agent_dispatcher.states import State, state_of
 from agent_dispatcher.supervisor import cycle as supervised_cycle
@@ -281,10 +281,16 @@ def sandbox(settings: Settings) -> Sandbox | None:
     """Return the configured sandbox, or None when it's off."""
     if settings.sandbox == "off":
         return None
-    return Sandbox(
+    box = Sandbox(
         host=settings.sandbox_host if settings.sandbox == "ssh" else None,
         ssh_key=settings.sandbox_ssh_key,
     )
+    try:
+        return box.resolved()
+    except SandboxError:
+        # Without its client the sandbox fails on first use, and the run goes
+        # on without it, as for any other sandbox fault.
+        return box
 
 
 def work_root(settings: Settings) -> Path:

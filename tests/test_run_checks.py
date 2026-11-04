@@ -301,3 +301,32 @@ def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(
     server = config["mcp"]["sandbox"]
     assert server["command"][1:4] == ["-P", "-m", "agent_dispatcher.sandbox_mcp"]
     assert server["environment"]["PYTHONSAFEPATH"] == "1"
+
+
+def test_the_run_tool_server_gets_the_client_and_what_windows_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("GH_TOKEN", "held-secret")
+    call = SandboxCall("img", "me@box", None, None, "C:/tools/ssh.exe")
+    server = json.loads(json.dumps(call.server(tmp_path)))
+    args: list[str] = server["command"]
+    assert args[args.index("--client") + 1] == "C:/tools/ssh.exe"
+    environment: dict[str, str] = server["environment"]
+    assert environment["SYSTEMROOT"] == r"C:\Windows"
+    assert "GH_TOKEN" not in environment
+    assert environment["PYTHONSAFEPATH"] == "1"
+
+
+def test_a_run_binds_the_resolved_client(tmp_path: Path, plain_origin: Path) -> None:
+    planner, _worker, reviewer = team([], [APPROVE])
+    run = team_run(
+        tmp_path, plain_origin, (planner, FakeModel("mimo"), reviewer), FakeGh()
+    )
+    run.providers = {**run.providers, "mimo": OpenCodeWorker(SecretStr("k"))}
+    run.sandbox = Sandbox(host="me@box", client="C:/tools/ssh.exe")
+    run.sandbox_image = "img"
+    bound = run._bound_provider("mimo", "implement", tmp_path / "c")  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(bound, OpenCodeWorker)
+    assert bound.sandbox is not None
+    assert bound.sandbox.client == "C:/tools/ssh.exe"

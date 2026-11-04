@@ -448,6 +448,7 @@ class Run:
                     self.sandbox.host,
                     self.sandbox.ssh_key,
                     clone.parent / f"run-{self.run_id}-sandbox.jsonl",
+                    self.sandbox.client,
                 ),
             )
         if adapter.checkpoint_root is None:

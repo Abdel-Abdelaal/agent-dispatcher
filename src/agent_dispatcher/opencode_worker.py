@@ -76,6 +76,10 @@ def steps_taken(output: str) -> int:
     return count
 
 
+# Variables the run tool's server keeps from the controller: none are secrets.
+_SERVER_ENV = ("SYSTEMROOT", "USERPROFILE", "HOME", "TEMP", "TMP", "PATHEXT")
+
+
 @dataclass(frozen=True)
 class SandboxCall:
     """A prepared sandbox image that one call's `run` tool executes commands in."""
@@ -84,6 +88,7 @@ class SandboxCall:
     host: str | None = None
     ssh_key: Path | None = None
     log: Path | None = None
+    client: str | None = None
 
     def server(self, worktree: Path) -> dict[str, object]:
         """Return OpenCode's config for the call's local sandbox MCP server."""
@@ -92,6 +97,8 @@ class SandboxCall:
             args += ["--host", self.host]
         if self.ssh_key is not None:
             args += ["--key", str(self.ssh_key)]
+        if self.client is not None:
+            args += ["--client", self.client]
         if self.log is not None:
             args += ["--log", str(self.log)]
         return {
@@ -107,7 +114,14 @@ class SandboxCall:
                 "agent_dispatcher.sandbox_mcp",
                 *args,
             ],
+            # OpenCode starts the server with only these variables: Windows
+            # sockets need SYSTEMROOT, and ssh its profile folder.
             "environment": {
+                **{
+                    name: os.environ[name]
+                    for name in _SERVER_ENV
+                    if os.environ.get(name)
+                },
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
                 "PYTHONSAFEPATH": "1",
             },

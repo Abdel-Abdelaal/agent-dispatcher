@@ -480,3 +480,59 @@ def test_the_runner_stops_reading_past_its_limit(
         1,
         "the sandbox returned more output than allowed",
     )
+
+
+def test_the_client_path_found_by_the_controller_is_what_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker = FakeDocker()
+    Sandbox(host="me@box", client="C:/tools/ssh.exe", execute=docker).run(
+        "img", tmp_path, "x"
+    )
+    assert docker.calls[0][0][0] == "C:/tools/ssh.exe"
+    local = FakeDocker()
+    Sandbox(client="/usr/bin/docker", execute=local).run("img", tmp_path, "x")
+    assert local.calls[0][0][0] == "/usr/bin/docker"
+    looked: list[str] = []
+
+    def found(name: str) -> str:
+        looked.append(name)
+        return "/x"
+
+    monkeypatch.setattr(sandbox, "program", found)
+    assert Sandbox(host="me@box").resolved().client == "/x"
+    assert Sandbox().resolved().client == "/x"
+    assert looked == ["ssh", "docker"]
+
+
+def test_the_run_tool_logs_why_the_sandbox_failed_but_never_tells_the_model(
+    tmp_path: Path,
+) -> None:
+    def broken(argv: list[str], stdin: bytes, timeout: float) -> tuple[int, str]:
+        del argv, stdin, timeout
+        return 255, "ssh: connect to host 100.82.195.92 port 22: refused"
+
+    log = tmp_path / "log.jsonl"
+    server = sandbox_mcp.Server(Sandbox(execute=broken), "img", tmp_path, log)
+    rpc(server, "initialize", {})
+    reply = rpc(server, "tools/call", {"name": "run", "arguments": {"command": "ls"}})
+    assert "100.82" not in json.dumps(reply)
+    entry = json.loads(log.read_text(encoding="utf-8"))
+    assert entry["outcome"] == "unavailable"
+    assert entry["error"] == "SandboxError"
+    assert entry["reason"] == "the sandbox could not run the command"
+
+
+def test_the_server_entry_point_passes_the_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served: list[sandbox_mcp.Server] = []
+
+    def serve(server: sandbox_mcp.Server, _in: object, _out: object) -> int:
+        served.append(server)
+        return 0
+
+    monkeypatch.setattr(sandbox_mcp, "serve", serve)
+    argv = ["--image", "img", "--worktree", str(tmp_path), "--client", "C:/ssh.exe"]
+    assert sandbox_mcp.main(argv) == 0
+    assert served[0].sandbox.client == "C:/ssh.exe"
