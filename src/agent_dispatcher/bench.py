@@ -167,6 +167,16 @@ def local_remote(task: BenchTask, root: Path) -> Path:
     return remote
 
 
+def tool_calls(log: Path) -> dict[str, int]:
+    """Count the run's sandbox tool calls, and those the sandbox couldn't serve."""
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    entries = [json.loads(line) for line in lines if line.strip()]
+    return {
+        "sandbox_calls": len(entries),
+        "sandbox_unavailable": sum(e.get("outcome") == "unavailable" for e in entries),
+    }
+
+
 def usage(directory: Path, run_id: int) -> dict[str, int]:
     """Sum the run's recorded tokens and model seconds from its telemetry."""
     totals = {"tokens": 0, "model_seconds": 0, "calls": 0}
@@ -257,6 +267,7 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         "resolved": published and graded.exit_code == 0,
         "wall_seconds": seconds,
         **usage(root / "telemetry", run_id),
+        **tool_calls(work / f"run-{run_id}-sandbox.jsonl"),
         "notes": list(run.notes),
     }
 

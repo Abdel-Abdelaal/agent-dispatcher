@@ -27,7 +27,7 @@ import time
 import tomllib
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
@@ -333,14 +333,21 @@ class Sandbox:
     ssh_key: Path | None = None
     timeout: int = 300
     execute: Exec = byte_exec
+    # The full path of ssh (remote) or docker (local), found by the controller:
+    # the run tool's server may get no PATH, and must never search its worktree.
+    client: str | None = None
+
+    def resolved(self) -> "Sandbox":
+        """Return this sandbox with its client program's full path, from PATH."""
+        return replace(self, client=program("docker" if self.host is None else "ssh"))
 
     def _docker(
         self, *args: str, stdin: bytes = b"", timeout: float = 120
     ) -> tuple[int, str]:
         """Run docker locally, or over ssh with every argument quoted for its shell."""
         if self.host is None:
-            return self.execute(["docker", *args], stdin, timeout)
-        login = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
+            return self.execute([self.client or "docker", *args], stdin, timeout)
+        login = [self.client or "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
         if self.ssh_key is not None:
             # Known hosts beside the key: the calling environment may be scrubbed.
             login += [
