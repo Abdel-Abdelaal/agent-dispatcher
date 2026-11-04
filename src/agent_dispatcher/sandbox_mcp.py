@@ -70,6 +70,7 @@ class Server:
                 outcome="unavailable",
                 error=type(error).__name__,
                 reason=(str(error).splitlines() or [""])[0][:300],
+                detail=getattr(error, "detail", ""),
                 seconds=round(time.monotonic() - started, 1),
             )
             return _text(

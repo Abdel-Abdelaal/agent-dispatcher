@@ -54,6 +54,8 @@ BASE_IMAGE = (
 )
 COMMAND_FILE = ".agent-sandbox-command"
 OUTPUT_LIMIT = 12_000
+# How much of a failed ssh or docker call a local log keeps.
+DETAIL_LIMIT = 600
 # The most the controller reads back from one container call.
 CAPTURE_LIMIT = 2 * 1024**2
 # The largest copy sent in; /work is a 512 MB tmpfs.
@@ -150,7 +152,16 @@ _FREE = re.compile(r"^\S+\s+\d+\s+\d+\s+(\d+)\s", re.MULTILINE)
 
 
 class SandboxError(RuntimeError):
-    """The sandbox couldn't be prepared or reached; the task goes on without it."""
+    """The sandbox couldn't be prepared or reached; the task goes on without it.
+
+    `detail` keeps the end of what ssh or docker printed, for local logs only:
+    it can name hosts and key paths, so it never goes to a model.
+    """
+
+    def __init__(self, message: str, detail: str = "") -> None:
+        """Keep the message for callers and the detail for diagnosis."""
+        super().__init__(message)
+        self.detail = detail[-DETAIL_LIMIT:]
 
 
 @dataclass(frozen=True)
@@ -515,7 +526,7 @@ class Sandbox:
         before, started, after = output.partition(STARTED + "\n")
         if not started:
             message = "the sandbox could not run the command"
-            raise SandboxError(message)
+            raise SandboxError(message, f"exit {code}: {output.strip()}")
         del before
         if len(after) >= OUTPUT_LIMIT:
             after = "[earlier output cut]\n" + after

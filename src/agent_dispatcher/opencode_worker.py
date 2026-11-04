@@ -77,7 +77,17 @@ def steps_taken(output: str) -> int:
 
 
 # Variables the run tool's server keeps from the controller: none are secrets.
-_SERVER_ENV = ("SYSTEMROOT", "USERPROFILE", "HOME", "TEMP", "TMP", "PATHEXT")
+# Windows' own ssh.exe exits 255, silently, without PROGRAMDATA (where its
+# system config lives), and the worker's scrubbed environment drops it.
+_SERVER_ENV = (
+    "SYSTEMROOT",
+    "PROGRAMDATA",
+    "USERPROFILE",
+    "HOME",
+    "TEMP",
+    "TMP",
+    "PATHEXT",
+)
 
 
 @dataclass(frozen=True)
