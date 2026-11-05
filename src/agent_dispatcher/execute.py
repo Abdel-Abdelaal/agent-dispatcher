@@ -104,18 +104,23 @@ check them against the plan and finish the work from there.
 """
 UNFINISHED_REVIEW = """
 Your review of this change ended before you gave the JSON verdict. Your notes from
-it are below. Give the verdict from them now, opening a file only to settle a doubt
-the notes leave. If the notes show the review was not finished, approve false and
-name what is unchecked. Return exactly one valid JSON object: quote property names,
+it are below. Give the verdict now from them and the text above: this turn has no
+tools. If the notes show the review was not finished, approve false and name what
+is unchecked. Return exactly one valid JSON object: quote property names,
 escape strings and omit commentary.
 """
-# Enough to settle one doubt: the full review already ran.
-RETRY_STEPS = 3
+# One turn with no tools: the full review already ran, and a capped retry with
+# tools only summarised again instead of giving the verdict.
+RETRY_STEPS = 1
 UNFINISHED = """
 The worker hit its time limit before it said it was done, so this diff may be
 unfinished. Reject it if any planned step is missing or any edit is incomplete.
 """
 SKIPPED_PLAN = "No separate plan: make exactly the change the issue describes."
+NO_PLAN = (
+    "No separate plan: the planner gave none in time. Read the files the issue "
+    "concerns, then make exactly the change the issue describes."
+)
 REPAIR_CI = """\
 You are fixing a failing CI check on a pull request. The repository in the current
 directory is checked out at the pull request's branch. Follow the AGENTS.md
@@ -315,6 +320,8 @@ def changed_files(clone: Path, patch: str) -> str:
 
 def step_budget(turns: int) -> str:
     """Tell a call its step cap: at the cap it loses its tools mid-task."""
+    if turns <= 1:
+        return "\nThis call has one turn and no tool steps: answer now.\n"
     return (
         f"\nPlan for at most {turns} tool steps in this call. Use them only for "
         "what the text above doesn't already show, and give your final answer "
@@ -490,6 +497,7 @@ class Run:
         context: Mapping[str, str] | None = None,
         verdict: Callable[[str], str] | None = None,
         max_steps: int | None = None,
+        fallback: str | None = None,
     ) -> str:
         """Run one model call, record it, and stop the run if it failed or ran out.
 
@@ -499,7 +507,9 @@ class Run:
         A worker may continue at a higher level in the same clone. Read-only
         planning/review is never restarted at its cap, which would repeat the same
         reading: a final reply written at the cap is returned for the caller's own
-        checks, and a call that ended with no reply stops the run.
+        checks, and a call that ended with no reply stops the run, unless the caller
+        gave a `fallback` to go on with instead (spent quota and lost evidence still
+        stop it).
         """
         prompt += (
             "\nController write restrictions apply at every directory depth: "
@@ -574,6 +584,7 @@ class Run:
             kind=kind,
             clone=clone,
             before=before,
+            fallback=fallback,
         )
 
     def _settle(  # noqa: PLR0913 - everything the step knew about its call
@@ -586,6 +597,7 @@ class Run:
         kind: str,
         clone: Path,
         before: str,
+        fallback: str | None = None,
     ) -> str:
         """Return a recorded call's reply, or stop the run if it can't be used."""
         if result.exhausted:
@@ -612,6 +624,12 @@ class Run:
                 if read_only and result.stop_reason == "max_turns"
                 else _STOP_REASONS.get(result.stop_reason, "")
             )
+            if fallback is not None and not result.retention_errors:
+                self.notes.append(
+                    f"{name} gave no reply while {stage}{why}, so the run went on "
+                    "without it."
+                )
+                return fallback
             raise Stop(self._failure(f"{name} failed while {stage}{why}."))
         if kind in _CODING and self.unfinished:
             # A later coding call that finished had the chance to complete the
@@ -715,6 +733,7 @@ class Run:
                 kind="plan",
                 context=issue_hash,
                 verdict=_plan_verdict,
+                fallback=NO_PLAN,
             )
         )
         self._check_plan(plan)
@@ -742,6 +761,7 @@ class Run:
                         kind="plan",
                         context={**issue_hash, "prior_plan": sha256(plan)},
                         verdict=_plan_verdict,
+                        fallback=plan,
                     )
                 )
                 self._check_plan(plan)

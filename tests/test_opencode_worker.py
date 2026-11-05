@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -335,3 +336,62 @@ def test_retention_failure_cannot_request_another_turn_escalation(
     result = worker.run("task", tmp_path, runner=runner, environ={})
     assert result.stop_reason == "candidate_unavailable"
     assert result.exit_code == 1
+
+
+def message_and_config(
+    tmp_path: Path, worker: OpenCodeWorker, *, read_only: bool, max_turns: int
+) -> tuple[str, dict[str, object], int]:
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    def runner(
+        argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
+    ) -> tuple[int, str, str]:
+        del cwd, stdin
+        seen.append((argv[-1], json.loads(env["OPENCODE_CONFIG_CONTENT"])))
+        return 0, stepped(1, '{"approve": true}'), ""
+
+    result = worker.run(
+        "task",
+        tmp_path,
+        read_only=read_only,
+        max_turns=max_turns,
+        runner=runner,
+        environ={},
+    )
+    return seen[0][0], seen[0][1], result.exit_code
+
+
+def test_read_only_calls_are_never_told_to_edit_or_fix(tmp_path: Path) -> None:
+    # 4 Nov benchmark: planners told to "edit ... and fix what fails" wrote code
+    # until the 20-minute limit, and capped reviewers ran tests instead of judging.
+    call = opencode_worker.SandboxCall("img")
+    for sandbox in (None, call):
+        worker = OpenCodeWorker(SecretStr("test-only"), sandbox=sandbox)
+        message, _, _ = message_and_config(
+            tmp_path, worker, read_only=True, max_turns=5
+        )
+        assert "Edit nothing" in message
+        assert "fix" not in message.lower()
+        assert ("sandbox run tool only" in message) == (sandbox is not None)
+        message, _, _ = message_and_config(
+            tmp_path, worker, read_only=False, max_turns=5
+        )
+        assert "Edit nothing" not in message
+        assert ("fix what fails" in message) == (sandbox is not None)
+
+
+def test_a_one_turn_call_has_no_tools_and_is_not_capped(tmp_path: Path) -> None:
+    worker = OpenCodeWorker(
+        SecretStr("test-only"), sandbox=opencode_worker.SandboxCall("img")
+    )
+    message, config, code = message_and_config(
+        tmp_path, worker, read_only=True, max_turns=1
+    )
+    assert "no tools" in message
+    assert config["permission"] == {"*": "deny"}
+    assert config["mcp"] == {}
+    agent = cast("dict[str, dict[str, object]]", config["agent"])
+    # Above one, so OpenCode never swaps the answer for its last-step summary.
+    assert agent["build"]["steps"] == opencode_worker.ANSWER_STEPS
+    assert agent["build"]["permission"] == {"*": "deny"}
+    assert code == 0

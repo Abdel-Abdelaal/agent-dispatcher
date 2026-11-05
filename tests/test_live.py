@@ -17,7 +17,15 @@ from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence
 from agent_dispatcher.dispatcher import Plan
-from agent_dispatcher.execute import Outcome, Provider, Run, Stop, json_reply, pr_title
+from agent_dispatcher.execute import (
+    NO_PLAN,
+    Outcome,
+    Provider,
+    Run,
+    Stop,
+    json_reply,
+    pr_title,
+)
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
 from agent_dispatcher.intake import Issue
@@ -513,11 +521,54 @@ def test_a_spent_worker_parks_the_task_and_names_itself(
 
 def test_a_failing_model_fails_the_run(tmp_path: Path, origin: Path) -> None:
     planner, worker, reviewer = models([], [])
-    planner.code = 1
+    worker.code = 1
     outcome = team_run(
         tmp_path, origin, (planner, worker, reviewer), FakeGh()
     ).execute()
-    assert outcome == Outcome(State.FAILED, "claude failed while planning.")
+    assert outcome == Outcome(State.FAILED, "mimo failed while implementing.")
+
+
+@pytest.mark.parametrize("stop_reason", ["", "timed_out"])
+def test_a_planner_without_a_plan_leaves_the_worker_to_plan(
+    tmp_path: Path, origin: Path, stop_reason: str
+) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+
+    def no_plan(prompt: str, worktree: Path, **kwargs: object) -> RunResult:
+        del prompt, worktree, kwargs
+        return RunResult("claude", 1, "", exhausted=False, stop_reason=stop_reason)
+
+    planner.run = no_plan  # type: ignore[method-assign]
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome == Outcome(State.REVIEW, "https://github.com/o/r/pull/9")
+    assert NO_PLAN in worker.prompts[0][0]
+    assert any("went on without it" in note for note in run.notes)
+
+
+def test_a_planner_that_lost_its_evidence_still_stops_the_run(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([], [])
+
+    def lost(prompt: str, worktree: Path, **kwargs: object) -> RunResult:
+        del prompt, worktree, kwargs
+        return RunResult(
+            "claude",
+            1,
+            "",
+            exhausted=False,
+            stop_reason="candidate_unavailable",
+            retention_errors=("native_storage_error",),
+        )
+
+    planner.run = lost  # type: ignore[method-assign]
+    outcome = team_run(
+        tmp_path, origin, (planner, worker, reviewer), FakeGh()
+    ).execute()
+    assert outcome.state is State.FAILED
+    assert outcome.detail.startswith("claude failed while planning")
+    assert worker.prompts == []
 
 
 def test_a_patch_that_does_not_apply_fails(tmp_path: Path, origin: Path) -> None:
@@ -620,7 +671,7 @@ def test_review_format_retry_is_read_only_not_a_code_repair(
     assert "exactly one valid JSON" in reviewer.prompts[1][0]
     # The retry turns its own notes into a verdict in a few steps, not a new review.
     assert "<<<PRIOR_REVIEW>>>\nbad\n<<<END_PRIOR_REVIEW>>>" in reviewer.prompts[1][0]
-    assert reviewer.turns[1] == 3
+    assert reviewer.turns[1] == 1
     assert reviewer.turns[0] != 3
 
 
@@ -654,16 +705,16 @@ def test_a_reader_capped_with_a_reply_keeps_it(tmp_path: Path, origin: Path) -> 
     )
 
 
-def test_a_reader_capped_with_no_reply_stops(tmp_path: Path, origin: Path) -> None:
+def test_a_planner_capped_with_no_reply_leaves_the_worker_to_plan(
+    tmp_path: Path, origin: Path
+) -> None:
     planner = StepCapped("claude", [""])
     worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
     reviewer = FakeModel("codex", [APPROVE])
-    outcome = team_run(
-        tmp_path, origin, (planner, worker, reviewer), FakeGh()
-    ).execute()
-    assert outcome.state is State.FAILED
-    assert "read-only turn cap" in outcome.detail
-    assert worker.prompts == []
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert NO_PLAN in worker.prompts[0][0]
+    assert any("read-only turn cap" in note for note in run.notes)
 
 
 def test_two_invalid_review_verdicts_fail_without_publication(
@@ -1823,12 +1874,10 @@ def test_read_only_planner_turn_cap_does_not_restart_its_conversation(
         FakeGh(),
         triage='{"proceed": true, "difficulty": "easy"}',
     )
-    outcome = run.execute()
-    assert outcome.state is State.FAILED
-    assert "no restart escalation" in outcome.detail
+    run.execute()
+    assert any("no restart escalation" in note for note in run.notes)
     assert planner.turns == [10]
-    assert worker.prompts == []
-    assert reviewer.prompts == []
+    assert NO_PLAN in worker.prompts[0][0]
 
 
 def test_read_only_reviewer_turn_cap_does_not_restart_or_authorize_repairs(
