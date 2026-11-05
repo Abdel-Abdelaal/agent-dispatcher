@@ -243,6 +243,7 @@ def record_routing(
 
 # One CI repair per agent PR: if that doesn't fix it, a human should look.
 MAX_CI_REPAIRS = 1
+CYCLE_MARGIN = timedelta(minutes=2)
 
 
 def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
@@ -270,6 +271,11 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
         sandbox=sandbox(settings),
+        # The supervisor kills the cycle at its limit; leave room for what the
+        # cycle did before this run started.
+        deadline=datetime.now(UTC)
+        + timedelta(seconds=settings.cycle_timeout_seconds)
+        - CYCLE_MARGIN,
         authorize=lambda original, expected: GitHubReader(
             client,
             settings.github_token.get_secret_value() if settings.github_token else None,

@@ -11,7 +11,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 
@@ -28,7 +28,12 @@ from agent_dispatcher.levels import (
 from agent_dispatcher.native_evidence import CallBinding
 from agent_dispatcher.opencode_worker import OpenCodeWorker, SandboxCall
 from agent_dispatcher.pr_review import secret_path
-from agent_dispatcher.providers import RunResult, Tuning
+from agent_dispatcher.providers import (
+    CALL_TIMEOUT,
+    STEP_TIMEOUT_SECONDS,
+    RunResult,
+    Tuning,
+)
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.roles import Team
 from agent_dispatcher.sandbox import (
@@ -139,6 +144,14 @@ REPAIR_CI_PLAN = "Fix the failing CI check shown in the log, and nothing else."
 MAX_REVIEWS = 2
 # Rounds the worker gets to fix failing checks before the review sees them.
 CHECK_FIXES = 1
+# Coding calls on harder tasks get longer. In the November benchmarks MiMo hit the
+# 20-minute limit on a medium and a hard change with the right code half done.
+# Read-only calls keep the base limit.
+WORK_SECONDS = {"easy": 20 * 60, "medium": 30 * 60, "hard": 40 * 60}
+# Kept back before the run's deadline for the gate, the checks and publishing.
+DEADLINE_RESERVE = timedelta(minutes=5)
+# A call given less time than this can't finish useful work, so the run stops.
+MIN_CALL_SECONDS = 4 * 60
 # Coding calls whose time-limited edits may still go to the gate and review. CI
 # repairs are left out: they push to an open PR, so they keep failing closed.
 _CODING = {"implement", "repair"}
@@ -149,7 +162,7 @@ _MARKDOWN_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _STOP_REASONS = {
     "candidate_unavailable": " (the final candidate evidence could not be retained)",
     "max_turns": " (it ran out of turns even at the hard level)",
-    "timed_out": " (it hit the 20-minute limit for one call)",
+    "timed_out": " (it hit its time limit for one call)",
 }
 _TRAILERS = {
     "claude": "Co-Authored-By: Claude <noreply@anthropic.com>",
@@ -413,6 +426,9 @@ class Run:
     skip_easy_docs_plan: bool = False
     authorize: Callable[[Issue, State], bool] | None = None
     sandbox: Sandbox | None = None
+    # When the run must be over (the cycle's own limit, less a margin); None means
+    # each call only has its own limit.
+    deadline: datetime | None = None
     unfinished: bool = field(default=False, init=False)
     # The prepared image, once the run has one, and the last check result.
     sandbox_image: str | None = field(default=None, init=False)
@@ -584,15 +600,20 @@ class Run:
             thinking, working = TURNS[self.level.label]
             turns = max_steps or (thinking if read_only else working)
             sent = prompt + step_budget(turns)
+            seconds = self._call_seconds(name, stage, read_only=read_only)
             started = datetime.now(UTC)
             adapter = self._bound_provider(name, kind, clone)
-            result = adapter.run(
-                sent,
-                clone,
-                read_only=read_only,
-                tuning=tuning,
-                max_turns=turns,
-            )
+            limit = CALL_TIMEOUT.set(seconds)
+            try:
+                result = adapter.run(
+                    sent,
+                    clone,
+                    read_only=read_only,
+                    tuning=tuning,
+                    max_turns=turns,
+                )
+            finally:
+                CALL_TIMEOUT.reset(limit)
             if (
                 result.stop_reason != "max_turns"
                 or self.level is Level.HARD
@@ -644,6 +665,22 @@ class Run:
             before=before,
             fallback=fallback,
         )
+
+    def _call_seconds(self, name: str, stage: str, *, read_only: bool) -> float:
+        """Return the next call's time limit, or stop the run if none is left.
+
+        A run that outlives its cycle is killed with nothing recorded, so calls
+        are cut short to end before the deadline instead.
+        """
+        limit = STEP_TIMEOUT_SECONDS if read_only else WORK_SECONDS[self.level.label]
+        if self.deadline is None:
+            return limit
+        left = (self.deadline - DEADLINE_RESERVE - datetime.now(UTC)).total_seconds()
+        if left < MIN_CALL_SECONDS:
+            raise Stop(
+                self._failure(f"The run's time ran out before {name} started {stage}.")
+            )
+        return min(limit, left)
 
     def _settle(  # noqa: PLR0913 - everything the step knew about its call
         self,
