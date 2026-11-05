@@ -225,8 +225,14 @@ def test_an_opencode_call_gets_the_run_tool_and_is_told_to_use_it(
 
     worker.run("task", tmp_path, runner=runner, environ={})
     assert "with the sandbox run tool" in seen[0]
+    # A behaviour bug is reproduced by a failing test before the fix, but only
+    # where the worker can run it.
+    assert "test that reproduces it" in seen[0]
     OpenCodeWorker(SecretStr("k")).run("task", tmp_path, runner=runner, environ={})
     assert "do not attempt shell commands" in seen[1]
+    assert "reproduces" not in seen[1]
+    worker.run("task", tmp_path, read_only=True, runner=runner, environ={})
+    assert "reproduces" not in seen[2]
 
 
 def test_a_run_binds_its_image_to_opencode_calls(
@@ -291,7 +297,11 @@ def test_the_reviewer_is_warned_about_weakened_checks(
     planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
     docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
     checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker).execute()
-    assert "conftest.py or tool settings" in reviewer.prompts[0][0]
+    prompt = reviewer.prompts[0][0]
+    assert "weakens, skips or deletes an existing test" in prompt
+    assert "changes conftest.py\nor tool settings" in prompt
+    # A reproducing test is the worker following its instructions, not weakening.
+    assert "A new test that reproduces" in prompt
 
 
 def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(

@@ -107,7 +107,9 @@ CHECKS_RESULT = """
 The controller ran the repository's own checks (lint, types, tests) on this
 change in a sandbox; their output is below. Reject a change whose checks fail
 because of it. Checks can be made to pass by weakening them, so reject any
-change to tests, conftest.py or tool settings that the issue doesn't call for.
+change that weakens, skips or deletes an existing test, or changes conftest.py
+or tool settings, that the issue doesn't call for. A new test that reproduces
+the issue's problem is welcome.
 """
 CONTINUED = """
 An earlier call ran out of steps on this task. Its edits are already in the files:
