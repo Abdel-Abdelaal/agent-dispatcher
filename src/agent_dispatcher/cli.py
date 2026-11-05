@@ -254,8 +254,14 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
     team: Team,
     client: httpx.Client,
     root: Path,
+    cycle_started: datetime | None = None,
 ) -> Run:
-    """Assemble a run with this host's adapters, git and GitHub access."""
+    """Assemble a run with this host's adapters, git and GitHub access.
+
+    The run's deadline counts from `cycle_started` when the run is part of a
+    supervised cycle, which the supervisor kills at its limit.
+    """
+    started = cycle_started or datetime.now(UTC)
     return Run(
         issue=issue,
         state=state_of(issue.labels) or State.READY,
@@ -271,9 +277,9 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
         sandbox=sandbox(settings),
-        # The supervisor kills the cycle at its limit; leave room for what the
-        # cycle did before this run started.
-        deadline=datetime.now(UTC)
+        # The supervisor kills the cycle at its limit, counted from just before
+        # this process started.
+        deadline=started
         + timedelta(seconds=settings.cycle_timeout_seconds)
         - CYCLE_MARGIN,
         authorize=lambda original, expected: GitHubReader(
@@ -320,12 +326,14 @@ def finish(
         queue.park(outcome.parked, until)
 
 
-def run_live(
+def run_live(  # noqa: PLR0913 - the cycle start bounds the run
     plan: Plan,
     settings: Settings,
     reader: GitHubReader,
     queue: RunQueue,
     client: httpx.Client,
+    *,
+    cycle_started: datetime | None = None,
 ) -> Outcome | None:
     """Run the planned task once, recording the run and parking a spent provider."""
     if plan.next_task is None or plan.team is None:
@@ -341,7 +349,13 @@ def run_live(
     outcome = Outcome(State.FAILED, "controller error")
     try:
         outcome = make_run(
-            settings, issue, run_id=run_id, team=team, client=client, root=root
+            settings,
+            issue,
+            run_id=run_id,
+            team=team,
+            client=client,
+            root=root,
+            cycle_started=cycle_started,
         ).execute()
     finally:
         finish(queue, run_id, outcome, settings, now)
@@ -353,6 +367,8 @@ def repair_next(
     reader: GitHubReader,
     queue: RunQueue,
     client: httpx.Client,
+    *,
+    cycle_started: datetime | None = None,
 ) -> str | None:
     """Repair the first agent PR whose blocking checks failed, once per PR."""
     now = datetime.now(UTC)
@@ -408,6 +424,7 @@ def repair_next(
                     team=team,
                     client=client,
                     root=root,
+                    cycle_started=cycle_started,
                 )
                 outcome = run.repair(pr, logs)
             finally:
@@ -494,6 +511,7 @@ def show_evidence(settings: Settings, repo: str, run_id: int) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one cycle: plan, then (unless --dry-run) execute the next task."""
+    cycle_started = datetime.now(UTC)
     parser = argparse.ArgumentParser(prog="agent-dispatcher")
     commands = parser.add_subparsers(dest="command", required=True)
     once = commands.add_parser("once", help="run one poll cycle")
@@ -536,11 +554,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             plan = cycle.plan(known, datetime.now(UTC))
             sys.stdout.write(describe(plan, dry_run=arguments.dry_run) + "\n")
             if not arguments.dry_run:
-                outcome = run_live(plan, settings, reader, queue, client)
+                outcome = run_live(
+                    plan, settings, reader, queue, client, cycle_started=cycle_started
+                )
                 if outcome is not None:
                     sys.stdout.write(f"result: {outcome.state} {outcome.detail}\n")
                 else:
-                    repaired = repair_next(settings, reader, queue, client)
+                    repaired = repair_next(
+                        settings, reader, queue, client, cycle_started=cycle_started
+                    )
                     if repaired is not None:
                         sys.stdout.write(f"{repaired}\n")
     finally:

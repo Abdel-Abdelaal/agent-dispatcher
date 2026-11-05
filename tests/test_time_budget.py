@@ -131,3 +131,55 @@ def test_a_live_run_ends_before_its_cycle_is_killed(tmp_path: Path) -> None:
         datetime.now(UTC) - before
     )
     assert run.deadline >= before + timedelta(seconds=3600) - cli.CYCLE_MARGIN
+
+
+def test_a_cycle_runs_deadline_counts_from_the_cycles_start(tmp_path: Path) -> None:
+    issue = Issue(
+        "owner/repo", 7, "Task", "Body", ("agent:ready",), "owner", is_open=True
+    )
+    settings = Settings(owner="owner", work_root=tmp_path, cycle_timeout_seconds=3600)
+    started = datetime.now(UTC) - timedelta(minutes=25)
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(500))
+    ) as client:
+        run = cli.make_run(
+            settings,
+            issue,
+            run_id=1,
+            team=Team("claude", "mimo", "codex"),
+            client=client,
+            root=tmp_path,
+            cycle_started=started,
+        )
+    assert run.deadline == started + timedelta(seconds=3600) - cli.CYCLE_MARGIN
+
+
+class Raising(Timed):
+    """Fails inside its call, as a broken adapter would."""
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        message = "adapter broke"
+        raise RuntimeError(message)
+
+
+def test_a_failing_call_never_leaks_its_time_limit(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner = Raising("claude")
+    run = team_run(tmp_path, origin, (planner, Timed("mimo"), Timed("codex")), FakeGh())
+    run.deadline = datetime.now(UTC) + DEADLINE_RESERVE + timedelta(minutes=10)
+    outcome = run.execute()
+    assert outcome.state is State.FAILED
+    assert 9 * 60 < planner.limits[0] <= 10 * 60
+    assert CALL_TIMEOUT.get() == STEP_TIMEOUT_SECONDS

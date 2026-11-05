@@ -152,10 +152,14 @@ MAX_REVIEWS = 2
 CHECK_FIXES = 1
 # Coding calls on harder tasks get longer. In the November benchmarks MiMo hit the
 # 20-minute limit on a medium and a hard change with the right code half done.
-# Read-only calls keep the base limit.
+# Read-only calls keep the base limit. Every provider adapter runs its CLI through
+# `subprocess_runner`, which applies these (triage's chat call has its own 120 s
+# limit). Near the deadline a call gets less: the 2-hour cycle leaves room for
+# about two hard coding calls plus planning and review.
 WORK_SECONDS = {"easy": 20 * 60, "medium": 30 * 60, "hard": 40 * 60}
-# Kept back before the run's deadline for the gate, the checks and publishing.
-DEADLINE_RESERVE = timedelta(minutes=5)
+# Kept back before the run's deadline for what follows the last call: a tidy run
+# and a check run in the sandbox (up to 5 minutes each), the gate and publishing.
+DEADLINE_RESERVE = timedelta(minutes=15)
 # A call given less time than this can't finish useful work, so the run stops.
 MIN_CALL_SECONDS = 4 * 60
 # Coding calls whose time-limited edits may still go to the gate and review. CI
