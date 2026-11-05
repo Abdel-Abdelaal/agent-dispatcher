@@ -876,6 +876,47 @@ def test_a_planner_capped_with_no_reply_leaves_the_worker_to_plan(
     assert run.execute().state is State.REVIEW
     assert NO_PLAN in worker.prompts[0][0]
     assert any("read-only turn cap" in note for note in run.notes)
+    # No notes to turn into a plan, so the planner isn't asked again.
+    assert len(planner.prompts) == 1
+
+
+NOTES = "Read main.py and api/errors.py; nothing edited."
+
+
+def test_a_capped_planner_turns_its_notes_into_a_plan(
+    tmp_path: Path, origin: Path
+) -> None:
+    # run 97009: the planner spent its 15 steps reading, and its capped summary
+    # of what it read went to the worker as the plan.
+    planner = TurnLimited(
+        "claude", 1, replies=[NOTES, "DIFFICULTY: hard\n1. Add docs/api.md"]
+    )
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    second, read_only = planner.prompts[1]
+    assert read_only
+    assert "ended at its step cap" in second
+    assert NOTES in second
+    assert planner.turns[1] == 1
+    assert "1. Add docs/api.md" in worker.prompts[0][0]
+    assert NOTES not in worker.prompts[0][0]
+    assert run.level is Level.HARD
+    assert any("turn its notes into a plan" in note for note in run.notes)
+
+
+@pytest.mark.parametrize("retry", ["", "DIFFICULTY: easy", "REFUSE: no"])
+def test_an_unusable_plan_from_the_notes_keeps_the_notes(
+    tmp_path: Path, origin: Path, retry: str
+) -> None:
+    planner = TurnLimited("claude", 1, replies=[NOTES, retry])
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert len(planner.prompts) == 2
+    assert NOTES in worker.prompts[0][0]
 
 
 def test_two_invalid_review_verdicts_fail_without_publication(
