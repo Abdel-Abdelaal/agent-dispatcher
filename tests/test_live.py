@@ -525,7 +525,7 @@ def test_no_change_fails(tmp_path: Path, origin: Path) -> None:
     assert [read_only for _, read_only in worker.prompts] == [False, False]
 
 
-class CutOffModel(FakeModel):
+class OutputLimitModel(FakeModel):
     """A worker whose first reply hits the output limit before it edits."""
 
     @override
@@ -546,14 +546,14 @@ class CutOffModel(FakeModel):
         return result
 
 
-@pytest.mark.parametrize("cut_off", [False, True])
+@pytest.mark.parametrize("output_limit", [False, True])
 def test_a_worker_that_changed_nothing_is_asked_once_more(
-    tmp_path: Path, origin: Path, *, cut_off: bool
+    tmp_path: Path, origin: Path, *, output_limit: bool
 ) -> None:
     # run 97009: the worker reasoned for 17 minutes, its reply was cut off at the
     # output limit with no edit made, and the run failed at once.
     edits: list[dict[str, str | None]] = [{}, {"docs/api.md": "# API\n"}]
-    worker = (CutOffModel if cut_off else FakeModel)("mimo", edits=edits)
+    worker = (OutputLimitModel if output_limit else FakeModel)("mimo", edits=edits)
     planner = FakeModel("claude", ["1. Add docs/api.md"])
     reviewer = FakeModel("codex", [APPROVE])
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
@@ -562,9 +562,9 @@ def test_a_worker_that_changed_nothing_is_asked_once_more(
     first, second = (prompt for prompt, _ in worker.prompts)
     assert "ended without changing any file" not in first
     assert "ended without changing any file" in second
-    assert ("still reasoning" in second) is cut_off
+    assert ("still reasoning" in second) is output_limit
     note = next(note for note in run.notes if "asked once more" in note)
-    assert ("output limit" in note) is cut_off
+    assert ("output limit" in note) is output_limit
     records = [
         json.loads(line)
         for line in next((tmp_path / "telemetry").glob("*.jsonl"))
@@ -572,7 +572,22 @@ def test_a_worker_that_changed_nothing_is_asked_once_more(
         .splitlines()
     ]
     implements = [r["outcome"] for r in records if r.get("stage") == "implement"]
-    assert implements == ["output_limit" if cut_off else "ok", "ok"]
+    assert implements == ["output_limit" if output_limit else "ok", "ok"]
+    # The retry finished, so the review gets no possibly-unfinished warning.
+    assert "this diff may be unfinished" not in reviewer.prompts[0][0]
+
+
+def test_edits_cut_off_at_the_output_limit_go_to_review_as_unfinished(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = OutputLimitModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    planner = FakeModel("claude", ["1. Add docs/api.md"])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    assert len(worker.prompts) == 1
+    assert any("hit the output limit while implementing" in n for n in run.notes)
+    assert "this diff may be unfinished" in reviewer.prompts[0][0]
 
 
 def test_a_repair_that_changes_nothing_is_not_asked_again(
@@ -1875,7 +1890,7 @@ def test_timed_out_edits_go_to_the_gate_and_an_informed_reviewer(
     assert run.execute().state is State.REVIEW
     review_prompt, read_only = reviewer.prompts[0]
     assert read_only
-    assert "may be\nunfinished" in review_prompt
+    assert "this diff may be unfinished" in review_prompt
     assert any("hit the call time limit while implementing" in n for n in run.notes)
     records = [
         json.loads(line)
@@ -1970,7 +1985,7 @@ def test_a_repair_timeout_with_new_edits_goes_to_an_informed_review(
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
     assert run.execute().state is State.REVIEW
     assert "unfinished" not in reviewer.prompts[0][0]
-    assert "may be\nunfinished" in reviewer.prompts[1][0]
+    assert "this diff may be unfinished" in reviewer.prompts[1][0]
 
 
 def test_a_later_finished_call_clears_the_unfinished_warning(
@@ -2007,7 +2022,7 @@ def test_a_later_finished_call_clears_the_unfinished_warning(
     reviewer = FakeModel("codex", [REJECT, APPROVE])
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
     assert run.execute().state is State.REVIEW
-    assert "may be\nunfinished" in reviewer.prompts[0][0]
+    assert "this diff may be unfinished" in reviewer.prompts[0][0]
     assert "unfinished" not in reviewer.prompts[1][0]
     assert not run.unfinished
     assert any("no longer get the possibly-unfinished warning" in n for n in run.notes)

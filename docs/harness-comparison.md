@@ -25,7 +25,9 @@ deadline (the cycle limit, less a margin and a 15-minute reserve for checks and
 publishing). OpenCode exits normally when a reply hits the output limit, so the
 adapter reports a last step that stopped for `length` as `output_limit`. A first
 coding call that changed no file, cut off or not, gets one more call that says so
-and asks for the edits; a repair that changes nothing is not repeated.
+and asks for the edits; a repair that changes nothing is not repeated. Edits made
+before a reply was cut off go to the gate and the reviewer as possibly unfinished,
+as they do after a timeout.
 
 The pinned version's home-directory override also excludes user `.opencode`
 agents/plugins, which project-config disabling alone does not exclude. This
