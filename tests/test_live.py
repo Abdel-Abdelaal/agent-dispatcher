@@ -419,6 +419,10 @@ def test_a_rejected_change_gets_one_repair_round(tmp_path: Path, origin: Path) -
     assert outcome.state is State.REVIEW
     assert "- typo" in worker.prompts[1][0]
     assert "+# API" in reviewer.prompts[1][0]
+    assert "<<<PRIOR_FINDINGS>>>" not in reviewer.prompts[0][0]
+    rereview = reviewer.prompts[1][0]
+    assert "An earlier review rejected this change" in rereview
+    assert "<<<PRIOR_FINDINGS>>>\n- typo\n<<<END_PRIOR_FINDINGS>>>" in rereview
 
 
 def test_two_rejections_fail_with_the_findings(tmp_path: Path, origin: Path) -> None:
