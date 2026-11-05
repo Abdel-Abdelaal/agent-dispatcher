@@ -123,6 +123,12 @@ escape strings and omit commentary.
 # One turn with no tools: the full review already ran, and a capped retry with
 # tools only summarised again instead of giving the verdict.
 RETRY_STEPS = 1
+PRIOR_FINDINGS = """
+An earlier review rejected this change for the problems below, and the worker
+has since tried to fix them. For each one, find the code that fixes it and check
+the fix is right, or name it again in your findings: a claim in the summary is not
+enough. Then review the whole change as usual.
+"""
 UNFINISHED = """
 The worker hit its time limit before it said it was done, so this diff may be
 unfinished. Reject it if any planned step is missing or any edit is incomplete.
@@ -945,12 +951,19 @@ class Run:
         return clone, patch
 
     def _review(
-        self, clone: Path, plan: str, patch: str, kind: str = "review"
+        self,
+        clone: Path,
+        plan: str,
+        patch: str,
+        kind: str = "review",
+        prior: str = "",
     ) -> tuple[bool, str, str]:
         prompt = (
             f"{REVIEW}\n{untrusted_block(self.issue)}\n{_fenced('PLAN', plan)}\n"
             f"{_fenced('DIFF', patch)}\n{changed_files(clone, patch)}"
         )
+        if prior:
+            prompt += f"{PRIOR_FINDINGS}{_fenced('PRIOR_FINDINGS', prior)}\n"
         if self.unfinished:
             prompt += UNFINISHED
         if self.checks is not None:
@@ -1145,7 +1158,9 @@ class Run:
         findings = ""
         for attempt in range(1, MAX_REVIEWS + 1):
             clone, patch = self._gate(agent_clone, attempt)
-            approved, summary, findings = self._review(clone, plan, patch)
+            approved, summary, findings = self._review(
+                clone, plan, patch, prior=findings
+            )
             self.notes.append(
                 f"Review {attempt} ({self.team.reviewer}, {self.level.label}): "
                 f"{summary}"
