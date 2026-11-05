@@ -228,9 +228,13 @@ class OpenCodeWorker:
         return (
             "Do the task in the attached file. "
             + (
-                "Edit with the file tools. Run the project's tests, linter and "
-                "type checker with the sandbox run tool, the only shell you "
-                "have, and fix what fails before you finish. "
+                "Edit with the file tools. When the task reports wrong behaviour "
+                "that no test shows yet, first add a test that reproduces it and "
+                "run it with the sandbox run tool to see it fail, then fix the "
+                "code; that test stays as part of the change. Run the project's "
+                "tests, linter and type checker with the sandbox run tool, the "
+                "only shell you have, and fix what fails "
+                "before you finish. "
                 if self.sandbox is not None
                 else "Use only available file tools. "
                 "CI runs tests; do not attempt shell commands. "

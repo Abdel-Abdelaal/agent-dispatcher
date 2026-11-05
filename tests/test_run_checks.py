@@ -225,8 +225,35 @@ def test_an_opencode_call_gets_the_run_tool_and_is_told_to_use_it(
 
     worker.run("task", tmp_path, runner=runner, environ={})
     assert "with the sandbox run tool" in seen[0]
+    # A behaviour bug is reproduced by a failing test before the fix, but only
+    # where the worker can run it.
+    assert "test that reproduces it" in seen[0]
+    assert "that test stays as part of the change" in seen[0]
     OpenCodeWorker(SecretStr("k")).run("task", tmp_path, runner=runner, environ={})
     assert "do not attempt shell commands" in seen[1]
+    assert "reproduces" not in seen[1]
+
+
+def test_a_read_only_call_with_the_run_tool_is_not_told_to_write_tests(
+    tmp_path: Path,
+) -> None:
+    # `_instruction` picks the read-only wording before the editing wording, so
+    # a planner or reviewer with the run tool never gets the test-first step.
+    call = SandboxCall("agent-sandbox:abc", "me@box", Path("C:/k/id"), tmp_path / "l")
+    seen: list[str] = []
+
+    def runner(
+        argv: list[str], cwd: Path, stdin: str, env: object
+    ) -> tuple[int, str, str]:
+        del cwd, stdin, env
+        seen.append(argv[-1])
+        return 0, "", ""
+
+    OpenCodeWorker(SecretStr("test-only"), sandbox=call).run(
+        "task", tmp_path, read_only=True, runner=runner, environ={}
+    )
+    assert "Edit nothing" in seen[0]
+    assert "reproduces" not in seen[0]
 
 
 def test_a_run_binds_its_image_to_opencode_calls(
@@ -291,7 +318,12 @@ def test_the_reviewer_is_warned_about_weakened_checks(
     planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
     docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
     checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker).execute()
-    assert "conftest.py or tool settings" in reviewer.prompts[0][0]
+    # Compare with whitespace collapsed, so reflowing the prompt can't break it.
+    prompt = " ".join(reviewer.prompts[0][0].split())
+    assert "weakens, skips or deletes an existing test" in prompt
+    assert "changes conftest.py or tool settings" in prompt
+    # A reproducing test is the worker following its instructions, not weakening.
+    assert "A new test that reproduces" in prompt
 
 
 def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(
