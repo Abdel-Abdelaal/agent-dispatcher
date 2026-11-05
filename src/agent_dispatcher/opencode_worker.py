@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -30,19 +30,23 @@ from agent_dispatcher.providers import (
 from agent_dispatcher.workspace import GitError
 
 
-def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
-    """Keep the last text reply and sum only explicit non-negative token counts."""
-    text = ""
-    usage: dict[str, int | float] = {}
-    failed = False
+def records(output: str) -> Iterator[dict[str, Any]]:
+    """Yield each JSON object in OpenCode's event stream, skipping anything else."""
     for line in output.splitlines():
         try:
             value: Any = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(value, dict):
-            continue
-        data = cast("dict[str, Any]", value)
+        if isinstance(value, dict):
+            yield cast("dict[str, Any]", value)
+
+
+def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
+    """Keep the last text reply and sum only explicit non-negative token counts."""
+    text = ""
+    usage: dict[str, int | float] = {}
+    failed = False
+    for data in records(output):
         part = data.get("part", {})
         if data.get("type") == "error":
             failed = True
@@ -64,16 +68,23 @@ def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
 
 def steps_taken(output: str) -> int:
     """Count the model steps OpenCode finished, from its JSON event stream."""
-    count = 0
-    for line in output.splitlines():
-        try:
-            value: Any = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            data = cast("dict[str, Any]", value)
-            count += data.get("type") == "step_finish"
-    return count
+    return sum(data.get("type") == "step_finish" for data in records(output))
+
+
+def finish_reason(output: str) -> str:
+    """Return why the last model step ended ("stop", "tool-calls", "length"...).
+
+    OpenCode ends the run when a step stops for any reason but tool calls, so
+    the last step's reason is why the run ended. Empty when no step said.
+    "length" is OpenCode's word for a reply cut off at the output limit.
+    """
+    reason = ""
+    for data in records(output):
+        part = data.get("part")
+        if data.get("type") == "step_finish" and isinstance(part, dict):
+            found = cast("dict[str, Any]", part).get("reason")
+            reason = found if isinstance(found, str) else ""
+    return reason
 
 
 # A one-turn call's internal cap: above one so no last-step summary prompt.
@@ -433,6 +444,11 @@ class OpenCodeWorker:
             # without tools. Say so, as Claude Code does, so the controller can
             # continue a worker and knows a final reply may be incomplete.
             result = replace(result, exit_code=1, stop_reason="max_turns")
+        elif result.exit_code == 0 and finish_reason(stdout) == "length":
+            # The reply hit the output limit, often still reasoning, and OpenCode
+            # ends there as if the model had finished. The run still counts as
+            # finished; the controller decides what an empty result is worth.
+            result = replace(result, stop_reason="output_limit")
         return (
             replace(
                 result,

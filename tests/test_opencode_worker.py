@@ -10,7 +10,7 @@ import pytest
 from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence, opencode_worker
-from agent_dispatcher.opencode_worker import OpenCodeWorker, events
+from agent_dispatcher.opencode_worker import OpenCodeWorker, events, finish_reason
 from agent_dispatcher.providers import RunResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
@@ -99,6 +99,42 @@ def test_reaching_the_step_cap_is_reported_like_claude_codes(
     else:
         assert (result.exit_code, result.stop_reason) == (0, "")
     assert not result.exhausted
+
+
+def finished(reasons: list[object]) -> str:
+    return "\n".join(
+        json.dumps({"type": "step_finish", "part": {"reason": reason}})
+        for reason in reasons
+    )
+
+
+def test_finish_reason_is_the_last_steps() -> None:
+    assert finish_reason(finished(["tool-calls", "length"])) == "length"
+    assert finish_reason(finished(["length", "tool-calls", "stop"])) == "stop"
+    assert finish_reason(finished(["length", None])) == ""
+    assert finish_reason('noise\n[]\n{"type":"step_finish","part":7}') == ""
+    assert finish_reason("") == ""
+
+
+@pytest.mark.parametrize(
+    ("reasons", "stop"),
+    [(["tool-calls", "length"], "output_limit"), (["length", "stop"], "")],
+)
+def test_a_reply_cut_off_at_the_output_limit_is_reported(
+    tmp_path: Path, reasons: list[object], stop: str
+) -> None:
+    # run 97009: OpenCode exits 0 when a reply hits the output limit, so the
+    # controller couldn't tell a cut-off worker from one that chose to stop.
+    def runner(
+        argv: list[str], cwd: Path, stdin: str, env: Mapping[str, str]
+    ) -> tuple[int, str, str]:
+        del argv, cwd, stdin, env
+        return 0, finished(reasons), ""
+
+    result = OpenCodeWorker(SecretStr("test-only")).run(
+        "task", tmp_path, max_turns=5, runner=runner, environ={}
+    )
+    assert (result.exit_code, result.stop_reason) == (0, stop)
 
 
 def test_run_isolates_config_state_and_prompt_then_cleans_it(tmp_path: Path) -> None:

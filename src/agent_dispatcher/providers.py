@@ -55,7 +55,8 @@ class RunResult:
     model: str | None = None
     effort: str | None = None
     usage: dict[str, int | float] | None = None
-    # Why a failed call stopped, when the harness says: "max_turns" or "timed_out".
+    # Why a call stopped, when the harness says: "max_turns" or "timed_out" for a
+    # failed call, "output_limit" for one whose last reply was cut off.
     stop_reason: str = ""
     retention_errors: tuple[str, ...] = ()
 
