@@ -76,6 +76,8 @@ def steps_taken(output: str) -> int:
     return count
 
 
+# A one-turn call's internal cap: above one so no last-step summary prompt.
+ANSWER_STEPS = 2
 # Variables the run tool's server keeps from the controller: none are secrets.
 # Windows' own ssh.exe exits 255, silently, without PROGRAMDATA (where its
 # system config lives), and the worker's scrubbed environment drops it.
@@ -190,13 +192,54 @@ class OpenCodeWorker:
             errors.append("receipt_storage_error")
         return tuple(errors)
 
+    def _instruction(self, *, read_only: bool, tools: bool) -> str:
+        """The command-line message: what this call may do with its tools.
+
+        A read-only planner or reviewer told to edit and fix spends its steps
+        trying, so it gets its own wording.
+        """
+        if not tools:
+            return (
+                "Do the task in the attached file. You have no tools: answer from "
+                "the attached text alone, in the requested format."
+            )
+        if read_only:
+            return (
+                "Do the task in the attached file. Edit nothing. "
+                + (
+                    "Use the sandbox run tool only to settle a specific doubt that "
+                    "reading the code doesn't. "
+                    if self.sandbox is not None
+                    else "Use only the read tools; do not attempt shell commands. "
+                )
+                + "Finish with the requested answer."
+            )
+        return (
+            "Do the task in the attached file. "
+            + (
+                "Edit with the file tools. Run the project's tests, linter and "
+                "type checker with the sandbox run tool, the only shell you "
+                "have, and fix what fails before you finish. "
+                if self.sandbox is not None
+                else "Use only available file tools. "
+                "CI runs tests; do not attempt shell commands. "
+            )
+            + "Finish with the requested answer once the file work is complete."
+        )
+
     def config(
-        self, *, read_only: bool, steps: int, worktree: Path | None = None
+        self,
+        *,
+        read_only: bool,
+        steps: int,
+        worktree: Path | None = None,
+        tools: bool = True,
     ) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads.
 
         With a sandbox, the one extra tool runs commands in its container, never
-        on this host.
+        on this host. Without tools every permission is denied, and OpenCode
+        leaves denied tools out of the request.
         """
         config = cast(
             "dict[str, Any]",
@@ -231,7 +274,9 @@ class OpenCodeWorker:
             formatter=False,
             compaction={"auto": True, "prune": True},
         )
-        if self.sandbox is not None and worktree is not None:
+        if not tools:
+            config["permission"] = {"*": "deny"}
+        elif self.sandbox is not None and worktree is not None:
             config["mcp"] = {"sandbox": self.sandbox.server(worktree)}
             config["permission"]["sandbox_run"] = "allow"
         model = config["provider"]["worker"]["models"][self.model]
@@ -305,7 +350,17 @@ class OpenCodeWorker:
         environ: Mapping[str, str] | None,
         fork: tuple[Path, str] | None = None,
     ) -> RunResult:
-        config = self.config(read_only=read_only, steps=steps, worktree=worktree)
+        # One turn means answer now: no tools, so there's nothing to cut off. The
+        # cap stays above one because OpenCode prefills a "summarise your work"
+        # message at its last step, which would replace the requested answer.
+        tools = steps > 1
+        cap = steps if tools else ANSWER_STEPS
+        config = self.config(
+            read_only=read_only,
+            steps=cap,
+            worktree=worktree if tools else None,
+            tools=tools,
+        )
         retention_errors: tuple[str, ...] = ()
         with tempfile.TemporaryDirectory(prefix=f"{self.name}-opencode-") as tmp:
             root = Path(tmp)
@@ -357,16 +412,7 @@ class OpenCodeWorker:
                 "--file",
                 str(task),
                 "--",
-                "Do the task in the attached file. "
-                + (
-                    "Edit with the file tools. Run the project's tests, linter and "
-                    "type checker with the sandbox run tool, the only shell you "
-                    "have, and fix what fails before you finish. "
-                    if self.sandbox is not None
-                    else "Use only available file tools. "
-                    "CI runs tests; do not attempt shell commands. "
-                )
-                + "Finish with the requested answer once the file work is complete.",
+                self._instruction(read_only=read_only, tools=tools),
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
             if fork is not None or self.checkpoint_root is not None:
@@ -382,7 +428,7 @@ class OpenCodeWorker:
             tuning=Tuning(self.model, ""),
             usage=usage,
         )
-        if result.exit_code == 0 and steps_taken(stdout) >= steps:
+        if result.exit_code == 0 and steps_taken(stdout) >= cap:
             # OpenCode exits normally at its cap, after making the model summarise
             # without tools. Say so, as Claude Code does, so the controller can
             # continue a worker and knows a final reply may be incomplete.
