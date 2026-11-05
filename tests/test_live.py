@@ -464,6 +464,69 @@ def test_no_change_fails(tmp_path: Path, origin: Path) -> None:
         tmp_path, origin, (planner, worker, reviewer), FakeGh()
     ).execute()
     assert outcome == Outcome(State.FAILED, "The worker made no changes.")
+    # It was asked once more, and only once.
+    assert [read_only for _, read_only in worker.prompts] == [False, False]
+
+
+class CutOffModel(FakeModel):
+    """A worker whose first reply hits the output limit before it edits."""
+
+    @override
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        result = super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+        if len(self.prompts) == 1:
+            return replace(result, stop_reason="output_limit")
+        return result
+
+
+@pytest.mark.parametrize("cut_off", [False, True])
+def test_a_worker_that_changed_nothing_is_asked_once_more(
+    tmp_path: Path, origin: Path, *, cut_off: bool
+) -> None:
+    # run 97009: the worker reasoned for 17 minutes, its reply was cut off at the
+    # output limit with no edit made, and the run failed at once.
+    edits: list[dict[str, str | None]] = [{}, {"docs/api.md": "# API\n"}]
+    worker = (CutOffModel if cut_off else FakeModel)("mimo", edits=edits)
+    planner = FakeModel("claude", ["1. Add docs/api.md"])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.REVIEW
+    first, second = (prompt for prompt, _ in worker.prompts)
+    assert "ended without changing any file" not in first
+    assert "ended without changing any file" in second
+    assert ("still reasoning" in second) is cut_off
+    note = next(note for note in run.notes if "asked once more" in note)
+    assert ("output limit" in note) is cut_off
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text()
+        .splitlines()
+    ]
+    implements = [r["outcome"] for r in records if r.get("stage") == "implement"]
+    assert implements == ["output_limit" if cut_off else "ok", "ok"]
+
+
+def test_a_repair_that_changes_nothing_is_not_asked_again(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "x\n"}, {}], [REJECT, REJECT])
+    outcome = team_run(
+        tmp_path, origin, (planner, worker, reviewer), FakeGh()
+    ).execute()
+    assert "did not approve after 2 rounds" in outcome.detail
+    assert [read_only for _, read_only in worker.prompts] == [False, False]
 
 
 def test_triage_can_decline(tmp_path: Path, origin: Path) -> None:

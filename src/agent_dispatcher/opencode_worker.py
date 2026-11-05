@@ -76,6 +76,28 @@ def steps_taken(output: str) -> int:
     return count
 
 
+def finish_reason(output: str) -> str:
+    """Return why the last model step ended ("stop", "tool-calls", "length"...).
+
+    OpenCode ends the run when a step stops for any reason but tool calls, so
+    the last step's reason is why the run ended. Empty when no step said.
+    """
+    reason = ""
+    for line in output.splitlines():
+        try:
+            value: Any = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        data = cast("dict[str, Any]", value)
+        part = data.get("part")
+        if data.get("type") == "step_finish" and isinstance(part, dict):
+            found = cast("dict[str, Any]", part).get("reason")
+            reason = found if isinstance(found, str) else ""
+    return reason
+
+
 # A one-turn call's internal cap: above one so no last-step summary prompt.
 ANSWER_STEPS = 2
 # Variables the run tool's server keeps from the controller: none are secrets.
@@ -433,6 +455,11 @@ class OpenCodeWorker:
             # without tools. Say so, as Claude Code does, so the controller can
             # continue a worker and knows a final reply may be incomplete.
             result = replace(result, exit_code=1, stop_reason="max_turns")
+        elif result.exit_code == 0 and finish_reason(stdout) == "length":
+            # The reply hit the output limit, often still reasoning, and OpenCode
+            # ends there as if the model had finished. The run still counts as
+            # finished; the controller decides what an empty result is worth.
+            result = replace(result, stop_reason="output_limit")
         return (
             replace(
                 result,

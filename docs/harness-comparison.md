@@ -22,7 +22,10 @@ for a final text response; it does not establish that code is correct or complet
 Every call runs under a process-tree timeout: 20 minutes for read-only calls, and
 20, 30 or 40 minutes for coding calls at easy, medium or hard, never past the run's
 deadline (the cycle limit, less a margin and a 15-minute reserve for checks and
-publishing).
+publishing). OpenCode exits normally when a reply hits the output limit, so the
+adapter reports a last step that stopped for `length` as `output_limit`. A first
+coding call that changed no file, cut off or not, gets one more call that says so
+and asks for the edits; a repair that changes nothing is not repeated.
 
 The pinned version's home-directory override also excludes user `.opencode`
 agents/plugins, which project-config disabling alone does not exclude. This

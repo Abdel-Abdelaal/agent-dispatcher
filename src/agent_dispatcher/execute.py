@@ -113,6 +113,13 @@ CONTINUED = """
 An earlier call ran out of steps on this task. Its edits are already in the files:
 check them against the plan and finish the work from there.
 """
+NO_EDITS = """
+An earlier call on this task ended without changing any file{why}. The plan
+above stands: make the edits now with your file tools. Keep each reply's
+reasoning short, act in small steps, and don't re-plan the whole change before
+the first edit.
+"""
+CUT_OFF = ", because its reply hit the output limit while it was still reasoning"
 UNFINISHED_REVIEW = """
 Your review of this change ended before you gave the JSON verdict. Your notes from
 it are below. Give the verdict now from them and the text above: this turn has no
@@ -440,6 +447,8 @@ class Run:
     # each call only has its own limit.
     deadline: datetime | None = None
     unfinished: bool = field(default=False, init=False)
+    # Why the last model call stopped, as its adapter said ("" when it didn't).
+    last_stop: str = field(default="", init=False)
     # The prepared image, once the run has one, and the last check result.
     sandbox_image: str | None = field(default=None, init=False)
     baseline: SandboxResult | None = field(default=None, init=False)
@@ -647,8 +656,11 @@ class Run:
             )
             if CONTINUED not in prompt:
                 prompt += CONTINUED
+        self.last_stop = result.stop_reason
         if result.exhausted:
             outcome = "exhausted"
+        elif result.stop_reason == "output_limit" and verdict is None:
+            outcome = "output_limit"
         elif result.stop_reason == "max_turns":
             outcome = "turns_exhausted"
         elif result.exit_code != 0:
@@ -903,15 +915,35 @@ class Run:
         if failures:
             prompt += f"{CHECKS_FAILED}{_fenced('CHECKS', failures)}\n"
         prompt += f"{untrusted_block(self.issue)}\n"
+        kind = "repair" if findings or failures else "implement"
         self._step(
             self.team.worker,
             "implementing",
             prompt,
             clone,
             read_only=False,
-            kind="repair" if findings or failures else "implement",
+            kind=kind,
             context={"plan": sha256(plan)},
         )
+        if kind == "implement" and not self.workspace.patch(clone).strip():
+            # A first call that changed nothing would fail the run: a worker that
+            # reasoned until its reply was cut off, or stopped before acting, gets
+            # one more call. A repair that changes nothing leaves the gate and the
+            # reviewer to judge the change already there.
+            why = CUT_OFF if self.last_stop == "output_limit" else ""
+            self.notes.append(
+                f"{self.team.worker} ended without changing any file{why}, so it "
+                "was asked once more to make the edits."
+            )
+            self._step(
+                self.team.worker,
+                "implementing",
+                prompt + NO_EDITS.format(why=why),
+                clone,
+                read_only=False,
+                kind=kind,
+                context={"plan": sha256(plan)},
+            )
 
     def _gate(
         self, agent_clone: Path, attempt: int, branch: str | None = None
