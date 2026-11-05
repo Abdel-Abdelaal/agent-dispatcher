@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
+from agent_dispatcher.execute import tidy_patch
 from agent_dispatcher.opencode_worker import OpenCodeWorker, SandboxCall
-from agent_dispatcher.sandbox import STARTED, Sandbox
+from agent_dispatcher.sandbox import STARTED, TIDY_END, TIDY_START, Sandbox
 from agent_dispatcher.states import State
 from agent_dispatcher.telemetry import Telemetry
 from test_live import APPROVE, FakeGh, FakeModel, git, team_run
@@ -333,3 +334,80 @@ def test_a_run_binds_the_resolved_client(tmp_path: Path, plain_origin: Path) -> 
     assert isinstance(bound, OpenCodeWorker)
     assert bound.sandbox is not None
     assert bound.sandbox.client == "C:/tools/ssh.exe"
+
+
+def tidy_output(diff: str) -> str:
+    return f"{TIDY_START}\n{diff}{TIDY_END}"
+
+
+FORMAT_DIFF = (
+    "diff --git a/app.py b/app.py\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/app.py\n"
+    "+++ b/app.py\n"
+    "@@ -1 +1 @@\n"
+    "-x=1\n"
+    "+x = 1\n"
+)
+
+
+def test_the_controller_formats_the_workers_python_before_the_checks(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    planner, worker, reviewer = team([{"app.py": "x=1\n"}], [APPROVE])
+    docker = ScriptedDocker(
+        [(0, "baseline ok"), (0, tidy_output(FORMAT_DIFF)), (0, "12 passed")]
+    )
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert docker.runs == 3
+    assert "+x = 1" in reviewer.prompts[0][0]
+    assert (tmp_path / "work/run-3-agent/app.py").read_text() == "x = 1\n"
+    assert "The controller formatted 1 file(s) with the repository's own ruff." in (
+        run.notes
+    )
+    assert gate_outcomes(tmp_path)[:2] == ["tidied", "checks_passed"]
+
+
+BODY = FORMAT_DIFF.split("\n", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "diff",
+    [
+        FORMAT_DIFF.replace("app.py", "other.py"),
+        "diff --git a/app.py b/app.py\nnew file mode 100644\n" + BODY,
+        "diff --git a/app.py b/README.md\n" + BODY,
+        "",
+    ],
+)
+def test_a_tidy_diff_beyond_the_workers_file_contents_is_refused(
+    diff: str,
+) -> None:
+    assert tidy_patch(tidy_output(diff), ["app.py"]) is None
+
+
+def test_a_tidy_diff_without_both_markers_is_ignored() -> None:
+    assert tidy_patch(FORMAT_DIFF, ["app.py"]) is None
+    assert tidy_patch(f"{TIDY_START}\n{FORMAT_DIFF}", ["app.py"]) is None
+    assert tidy_patch(tidy_output(FORMAT_DIFF), ["app.py"]) == FORMAT_DIFF
+
+
+def test_a_failed_tidy_leaves_the_workers_edits_alone(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    bad = FORMAT_DIFF.replace("-x=1", "-y=2")
+    planner, worker, reviewer = team([{"app.py": "x=1\n"}], [APPROVE])
+    docker = ScriptedDocker([(0, "baseline ok"), (0, tidy_output(bad)), (0, "ok")])
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert (tmp_path / "work/run-3-agent/app.py").read_text() == "x=1\n"
+    assert "tidied" not in gate_outcomes(tmp_path)
+
+
+def test_only_python_changes_are_tidied(tmp_path: Path, uv_origin: Path) -> None:
+    planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
+    docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert docker.runs == 2

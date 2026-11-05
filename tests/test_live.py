@@ -130,7 +130,7 @@ class FakeModel:
                     target.unlink()
                 else:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(text, encoding="utf-8")
+                    target.write_text(text, encoding="utf-8", newline="\n")
             # A hostile agent plants a hook; the controller must never run it.
             hook = worktree / ".git" / "hooks" / "pre-push"
             hook.write_text("#!/bin/sh\necho pwned > ../pwned\n", encoding="utf-8")
@@ -546,6 +546,28 @@ def test_a_planner_without_a_plan_leaves_the_worker_to_plan(
     assert any("went on without it" in note for note in run.notes)
 
 
+def test_an_empty_plan_leaves_the_worker_to_plan(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([{"docs/api.md": "# API\n"}], [APPROVE])
+    planner.replies = ["   "]
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome == Outcome(State.REVIEW, "https://github.com/o/r/pull/9")
+    assert NO_PLAN in worker.prompts[0][0]
+    assert "The planner returned an empty plan, so the run went on without it." in (
+        run.notes
+    )
+
+
+def test_a_planner_refusal_still_stops_the_run(tmp_path: Path, origin: Path) -> None:
+    planner, worker, reviewer = models([], [])
+    planner.replies = ["REFUSE: needs a protected-path edit"]
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome.state is State.FAILED
+    assert "The planner refused: needs a protected-path edit" in outcome.detail
+    assert worker.prompts == []
+
+
 def test_a_planner_that_lost_its_evidence_still_stops_the_run(
     tmp_path: Path, origin: Path
 ) -> None:
@@ -860,13 +882,21 @@ def test_malformed_triage_stops_before_model_work(
     assert records[-1]["outcome"] == "invalid_json"
 
 
-@pytest.mark.parametrize(
-    "reply", ["DIFFICULTY: hard\n", "DIFFICULTY: hard\nREFUSE: unsafe"]
-)
-def test_invalid_plan_never_refines_or_starts_work(
-    tmp_path: Path, origin: Path, reply: str
-):
-    planner = FakeModel("claude", [reply])
+def plan_outcomes(tmp_path: Path) -> list[str]:
+    return [
+        record["outcome"]
+        for record in map(
+            json.loads,
+            next((tmp_path / "telemetry").glob("*.jsonl"))
+            .read_text(encoding="utf-8")
+            .splitlines(),
+        )
+        if record["stage"] == "plan"
+    ]
+
+
+def test_a_refused_plan_never_refines_or_starts_work(tmp_path: Path, origin: Path):
+    planner = FakeModel("claude", ["DIFFICULTY: hard\nREFUSE: unsafe"])
     worker = FakeModel("mimo")
     reviewer = FakeModel("codex")
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
@@ -875,15 +905,22 @@ def test_invalid_plan_never_refines_or_starts_work(
     assert len(planner.prompts) == 1
     assert not worker.prompts
     assert not reviewer.prompts
-    records = [
-        json.loads(line)
-        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert records[-1]["outcome"] == (
-        "refused" if "REFUSE:" in reply else "invalid_plan"
-    )
+    assert plan_outcomes(tmp_path) == ["refused"]
+
+
+def test_an_empty_rated_plan_is_never_refined_and_the_worker_plans(
+    tmp_path: Path, origin: Path
+):
+    planner = FakeModel("claude", ["DIFFICULTY: hard\n"])
+    worker = FakeModel("mimo", edits=[{"docs/api.md": "# API\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    assert run.execute().state is State.REVIEW
+    assert len(planner.prompts) == 1
+    assert NO_PLAN in worker.prompts[0][0]
+    assert run.level is Level.HARD
+    assert plan_outcomes(tmp_path) == ["invalid_plan"]
 
 
 def test_same_mimo_model_keeps_its_completed_harder_plan(tmp_path: Path, origin: Path):

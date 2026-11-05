@@ -87,6 +87,32 @@ CHECKS = (
     "else python -m unittest discover -s tests 2>&1 || status=1; fi; "
     "exit $status"
 )
+# Brackets the diff a tidy run prints, so the output's own trimming can't touch it.
+TIDY_START = "agent-tidy-diff-start"
+TIDY_END = "agent-tidy-diff-end"
+
+
+def tidy_command(files: list[str]) -> str:
+    """Format `files` and apply ruff's safe fixes, then print the diff they made.
+
+    Only with the repository's own locked ruff, and only on the named files: the
+    project's exclusions still hold, and unsafe fixes never apply whatever its
+    config says. The diff is against the snapshot of the copied worktree.
+    """
+    names = " ".join(shlex.quote(name) for name in files)
+    common = "--no-cache --force-exclude --quiet"
+    return (
+        "if [ -x /opt/venv/bin/ruff ]; then "
+        f"ruff check --fix-only --no-unsafe-fixes {common} -- {names}; "
+        f"ruff format {common} -- {names}; "
+        "fi >/dev/null 2>&1; "
+        f"echo {TIDY_START}; "
+        "git -c core.quotePath=false diff --binary --no-color --no-ext-diff "
+        "--no-textconv --unified=1; "
+        f"echo {TIDY_END}"
+    )
+
+
 # The project is found from /work, where each run unpacks it, not installed.
 _PATH_FILE = (
     '/opt/venv/bin/python -c "import site; '
