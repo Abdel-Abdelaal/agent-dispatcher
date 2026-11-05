@@ -348,7 +348,7 @@ def test_controller_call_retains_binding_before_native_process_starts(
         assert call() == "done"
         assert run.unfinished
     elif exit_code or snapshot_failure:
-        message = "20-minute limit" if exit_code == 124 else "final candidate evidence"
+        message = "its time limit" if exit_code == 124 else "final candidate evidence"
         with pytest.raises(Stop, match=message):
             call()
     else:
@@ -1135,7 +1135,7 @@ def test_a_timed_out_ci_repair_with_edits_still_fails_closed(
     run, gh = repair_run(tmp_path, origin, worker, reviewer)
     outcome = run.repair(pr, "E501 line too long")
     assert outcome.state is State.FAILED
-    assert "hit the 20-minute limit" in outcome.detail
+    assert "hit its time limit" in outcome.detail
     assert reviewer.prompts == []
     assert run.unfinished is False
     assert git(origin, "rev-parse", "agent/7-run-3").strip() == pr.sha
@@ -1842,7 +1842,7 @@ def test_a_timeout_without_edits_still_fails(tmp_path: Path, origin: Path) -> No
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
     assert run.execute() == Outcome(
         State.FAILED,
-        "mimo failed while implementing (it hit the 20-minute limit for one call).",
+        "mimo failed while implementing (it hit its time limit for one call).",
     )
     assert reviewer.prompts == []
 
@@ -1891,7 +1891,7 @@ def test_a_repair_timeout_that_changed_nothing_still_fails(
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
     assert run.execute() == Outcome(
         State.FAILED,
-        "mimo failed while implementing (it hit the 20-minute limit for one call).",
+        "mimo failed while implementing (it hit its time limit for one call).",
     )
     assert len(reviewer.prompts) == 1
 
