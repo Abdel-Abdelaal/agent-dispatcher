@@ -118,9 +118,10 @@ escape strings and omit commentary.
 # One turn with no tools: the full review already ran, and a capped retry with
 # tools only summarised again instead of giving the verdict.
 RETRY_STEPS = 1
+NO_FINDINGS = "The review rejected the change without naming a specific problem."
 PRIOR_FINDINGS = """
 An earlier review rejected this change for the problems below, and the worker
-has since tried to fix them. For each one, find the code that fixes it and check
+was asked to fix them. For each one, find the code that fixes it and check
 the fix is right, or name it again in your findings: a claim in the summary is not
 enough. Then review the whole change as usual.
 """
@@ -269,7 +270,12 @@ def _review_verdict(text: str) -> str:
 
 
 def _fenced(label: str, text: str) -> str:
-    return f"<<<{label}>>>\n{text.strip()}\n<<<END_{label}>>>"
+    """Fence `text` for a prompt. Fence-shaped markers in it are removed first.
+
+    Pasted text (model replies, diffs, logs) is untrusted: a line that looks like
+    a fence would end this one early and let the rest read as instructions.
+    """
+    return f"<<<{label}>>>\n{_FENCE_MIMIC.sub('', text).strip()}\n<<<END_{label}>>>"
 
 
 # Repository text pasted into prompts saves the steps a model spends finding and
@@ -1130,6 +1136,9 @@ class Run:
             )
             if approved:
                 return self._publish(clone, plan)
+            if not findings:
+                # The rejection must still reach the worker and the next review.
+                findings = f"- {summary.strip() or NO_FINDINGS}"
             if attempt < MAX_REVIEWS:
                 if self.level < Level.HARD:
                     self.level = harder(self.level)
