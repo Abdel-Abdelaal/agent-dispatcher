@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 
-from agent_dispatcher.gate import PROTECTED_PATTERNS, Limits, refusals
+from agent_dispatcher.gate import PROTECTED_PATTERNS, Limits, patch_size, refusals
 from agent_dispatcher.github import AgentPr
 from agent_dispatcher.intake import Issue, sanitise, untrusted_block
 from agent_dispatcher.levels import (
@@ -100,6 +100,17 @@ CHECKS_FAILED = """
 The repository's own checks (lint, types, tests) failed on your change; their
 output is below. Fix the cause and change nothing else. Never weaken, skip or
 delete a test or check to make it pass.
+"""
+SIZE_LIMIT = """
+The whole change, tests and docs included, must stay within {files} files and
+{lines} changed lines (added plus deleted), or the controller refuses it: keep
+tests focused and docs brief.
+"""
+TOO_BIG = """
+Your change is {lines} changed lines in {files} files; the limit is {max_lines}
+lines in {max_files} files, and the controller refuses anything bigger. Make it
+smaller without dropping anything the issue requires: cut repeated tests, long
+docs and edits the issue doesn't need. To remove a file you added, empty it.
 """
 CHECKS_BROKEN = (
     "The checks could not run on this change, though they ran on the code before "
@@ -478,6 +489,8 @@ class Run:
     unfinished: bool = field(default=False, init=False)
     # Why the last model call stopped, as its adapter said ("" when it didn't).
     last_stop: str = field(default="", init=False)
+    # Whether the worker was already asked to shrink an oversized change.
+    shrunk: bool = field(default=False, init=False)
     # The prepared image, once the run has one, and the last check result.
     sandbox_image: str | None = field(default=None, init=False)
     baseline: SandboxResult | None = field(default=None, init=False)
@@ -1001,15 +1014,24 @@ class Run:
         return plan
 
     def _implement(
-        self, clone: Path, plan: str, findings: str = "", failures: str = ""
+        self,
+        clone: Path,
+        plan: str,
+        findings: str = "",
+        failures: str = "",
+        too_big: str = "",
     ) -> None:
         prompt = f"{IMPLEMENT}\n{_fenced('PLAN', plan)}\n"
+        prompt += SIZE_LIMIT.format(
+            files=self.limits.max_files, lines=self.limits.max_lines
+        )
         if findings:
             prompt += f"{REPAIR}{_fenced('FINDINGS', findings)}\n"
         if failures:
             prompt += f"{CHECKS_FAILED}{_fenced('CHECKS', failures)}\n"
+        prompt += too_big
         prompt += f"{untrusted_block(self.issue)}\n"
-        kind = "repair" if findings or failures else "implement"
+        kind = "repair" if findings or failures or too_big else "implement"
         self._step(
             self.team.worker,
             "implementing",
@@ -1244,6 +1266,35 @@ class Run:
             self.notes.append("The repository's checks failed; the worker fixes them.")
             self._implement(clone, plan, failures=self.checks.report())
 
+    def _fit(self, clone: Path, plan: str) -> None:
+        """Ask the worker once to shrink a change too big for the gate's limits.
+
+        The gate refuses an oversized change only at the end, after the checks,
+        so the worker would never hear why. This asks before that, once per run;
+        the gate's limits are unchanged and it still has the final word.
+        """
+        files, lines = patch_size(self.workspace.patch(clone))
+        if self.shrunk or (
+            files <= self.limits.max_files and lines <= self.limits.max_lines
+        ):
+            return
+        self.shrunk = True
+        self.notes.append(
+            f"The change was {lines} lines in {files} files, over the gate's "
+            "limits, so the worker was asked once to make it smaller."
+        )
+        self._implement(
+            clone,
+            plan,
+            too_big=TOO_BIG.format(
+                files=files,
+                lines=lines,
+                max_files=self.limits.max_files,
+                max_lines=self.limits.max_lines,
+            ),
+        )
+        self._verify(clone, plan)
+
     def _tidy(self, clone: Path, sandbox: Sandbox, image: str) -> None:
         """Format the worker's Python files and apply ruff's safe fixes.
 
@@ -1285,6 +1336,7 @@ class Run:
         plan = self._plan(agent_clone)
         self._implement(agent_clone, plan)
         self._verify(agent_clone, plan)
+        self._fit(agent_clone, plan)
         findings = ""
         for attempt in range(1, MAX_REVIEWS + 1):
             clone, patch = self._gate(agent_clone, attempt)
@@ -1310,6 +1362,7 @@ class Run:
                     )
                 self._implement(agent_clone, plan, findings)
                 self._verify(agent_clone, plan)
+                self._fit(agent_clone, plan)
         return self._failure(
             f"The reviewer did not approve after {MAX_REVIEWS} rounds:\n{findings}"
         )

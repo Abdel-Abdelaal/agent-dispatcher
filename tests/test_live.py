@@ -549,6 +549,41 @@ class OutputLimitModel(FakeModel):
         return result
 
 
+BIG = "".join(f"line {n}\n" for n in range(150))
+
+
+def test_an_oversized_change_gets_one_call_to_shrink(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = FakeModel("mimo", edits=[{"docs/api.md": BIG}, {"docs/api.md": "# API\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    first, second = worker.prompts[0][0], worker.prompts[1][0]
+    # Every coding call is told the limits; only the second is told it's over them.
+    assert "within 5 files and\n100 changed lines" in first
+    assert "Your change is" not in first
+    assert "Your change is 150 changed lines in 1 files" in second
+    assert (
+        "The change was 150 lines in 1 files, over the gate's limits, so the worker "
+        "was asked once to make it smaller."
+    ) in run.notes
+
+
+def test_a_change_still_too_big_after_one_shrink_is_refused(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = FakeModel("mimo", edits=[{"docs/api.md": BIG}, {"docs/more.md": BIG}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    outcome = team_run(
+        tmp_path, origin, (planner, worker, reviewer), FakeGh()
+    ).execute()
+    assert outcome.state is State.FAILED
+    assert "300 lines changed, limit 100" in outcome.detail
+    assert len([p for p in worker.prompts if not p[1]]) == 2
+    assert reviewer.prompts == []
+
+
 @pytest.mark.parametrize("output_limit", [False, True])
 def test_a_worker_that_changed_nothing_is_asked_once_more(
     tmp_path: Path, origin: Path, *, output_limit: bool
