@@ -83,27 +83,30 @@ def test_test_deletion_can_be_allowed_per_task() -> None:
     assert refusals([FileChange("tests/test_a.py", 0, 5)], limits) == []
 
 
-PATCH = r"""diff --git a/src/a.py b/src/a.py
-index 1111111..2222222 100644
---- a/src/a.py
-+++ b/src/a.py
-@@ -1,3 +1,3 @@
- keep
---- a removed line that looks like a header
-+++ an added line that looks like a header
-+new
-\ No newline at end of file
-diff --git a/logo.png b/logo.png
-new file mode 100644
-index 0000000..3333333
-GIT binary patch
-literal 4
-LcmZ?wbYK7g0J{K~
-
-literal 0
-HcmV?d00001
-
-"""
+PATCH = "\n".join(
+    [
+        "diff --git a/src/a.py b/src/a.py",
+        "index 1111111..2222222 100644",
+        "--- a/src/a.py",
+        "+++ b/src/a.py",
+        "@@ -1,3 +1,3 @@",
+        " keep",
+        "--- a removed line that looks like a header",
+        "+++ an added line that looks like a header",
+        "+new",
+        "\\ No newline at end of file",
+        "diff --git a/logo.png b/logo.png",
+        "new file mode 100644",
+        "index 0000000..3333333",
+        "GIT binary patch",
+        "literal 4",
+        "LcmZ?wbYK7g0J{K~",
+        "",
+        "literal 0",
+        "HcmV?d00001",
+        "",
+    ]
+)
 
 
 def test_patch_size_counts_like_numstat() -> None:
