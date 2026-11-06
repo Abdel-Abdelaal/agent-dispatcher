@@ -59,6 +59,9 @@ ISSUE = Issue(
 TEAM = Team(planner="claude", worker="mimo", reviewer="codex")
 APPROVE = json.dumps({"approve": True, "summary": "Looks right.", "findings": []})
 REJECT = json.dumps({"approve": False, "summary": "Wrong.", "findings": ["typo"]})
+REJECT_LEFTOVER = json.dumps(
+    {"approve": False, "summary": "Leftover.", "findings": ["remove scratch_t.py"]}
+)
 GIT_ENV = {
     **os.environ,
     "GIT_AUTHOR_NAME": "t",
@@ -1870,10 +1873,31 @@ def test_running_out_of_turns_raises_the_level_and_continues(
     assert ("implement", "ok") in outcomes
 
 
-def test_out_of_turns_at_hard_fails_with_the_reason(
+def test_edits_cut_off_by_the_hard_turn_cap_go_to_an_informed_reviewer(
     tmp_path: Path, origin: Path
 ) -> None:
-    worker = TurnLimited("mimo", 5, edits=[{"a.md": "x\n"}] * 5)
+    worker = TurnLimited("mimo", 1, edits=[{"docs/api.md": "# API\n"}])
+    planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex", [APPROVE])
+    run = team_run(
+        tmp_path,
+        origin,
+        (planner, worker, reviewer),
+        FakeGh(),
+        triage='{"proceed": true, "difficulty": "hard"}',
+    )
+    assert run.execute().state is State.REVIEW
+    assert worker.turns == [40]
+    assert "this diff may be unfinished" in reviewer.prompts[0][0]
+    assert (
+        "mimo ran out of turns even at the hard level while implementing; its "
+        "edits so far go to the gate and the reviewer as possibly unfinished."
+    ) in run.notes
+
+
+def test_out_of_turns_at_hard_without_edits_fails_with_the_reason(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = TurnLimited("mimo", 5)
     planner, reviewer = FakeModel("claude", ["1. plan"]), FakeModel("codex")
     run = team_run(
         tmp_path,
@@ -1888,6 +1912,36 @@ def test_out_of_turns_at_hard_fails_with_the_reason(
         "mimo failed while implementing (it ran out of turns even at the hard level).",
     )
     assert worker.turns == [40]
+
+
+def test_new_files_the_worker_emptied_are_deleted_before_review(
+    tmp_path: Path, origin: Path
+) -> None:
+    edits: list[dict[str, str | None]] = [
+        {
+            "docs/api.md": "# API\n",
+            "scratch_t.py": "print(1)\n",
+            "pkg/__init__.py": "",
+            "README.md": "",
+        },
+        # The repair, asked to remove the scratch file, can only empty it.
+        {"scratch_t.py": " \n"},
+    ]
+    worker = FakeModel("mimo", edits=edits)
+    planner = FakeModel("claude", ["1. plan"])
+    reviewer = FakeModel("codex", [REJECT_LEFTOVER, APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    first, second = reviewer.prompts[0][0], reviewer.prompts[1][0]
+    assert "diff --git a/scratch_t.py" in first
+    assert "diff --git a/scratch_t.py" not in second
+    # Empty files a change adds on purpose, and emptied tracked files, stay.
+    assert "diff --git a/pkg/__init__.py" in second
+    assert "diff --git a/README.md" in second
+    assert (
+        "The controller deleted the new file(s) mimo emptied: scratch_t.py."
+        in run.notes
+    )
 
 
 class TimedOut(FakeModel):
