@@ -34,12 +34,19 @@ def kept_awake(set_state: SetState | None = None) -> Generator[None]:
     """Hold the system awake on this thread until the block ends.
 
     The request lasts while this thread lives, so a killed process releases it.
-    A failed request is ignored: the work runs as it would have without it.
+    A refused request or release is reported on stderr and the work goes on as it
+    would have without it. Not reentrant: the state is per thread, so a nested
+    block's release would drop the outer hold too.
     """
     setter = set_state if set_state is not None else windows_setter()
-    held = setter is not None and setter(CONTINUOUS | SYSTEM_REQUIRED) != 0
+    if setter is None:
+        yield
+        return
+    held = setter(CONTINUOUS | SYSTEM_REQUIRED) != 0
+    if not held:
+        sys.stderr.write("Windows refused to keep the PC awake; it may sleep.\n")
     try:
         yield
     finally:
-        if held and setter is not None:
-            setter(CONTINUOUS)
+        if held and setter(CONTINUOUS) == 0:
+            sys.stderr.write("Windows refused to release the keep-awake request.\n")
