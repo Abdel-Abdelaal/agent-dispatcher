@@ -703,6 +703,49 @@ def test_a_failing_model_fails_the_run(tmp_path: Path, origin: Path) -> None:
         tmp_path, origin, (planner, worker, reviewer), FakeGh()
     ).execute()
     assert outcome == Outcome(State.FAILED, "mimo failed while implementing.")
+    assert len(worker.prompts) == 2
+
+
+class FailsOnceModel(FakeModel):
+    """Fails its first call with no reason given, then behaves."""
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        if not self.prompts:
+            self.prompts.append((prompt, read_only))
+            return RunResult(self.name, 1, "", exhausted=False)
+        return super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+
+
+def test_a_call_that_failed_without_a_reason_is_tried_once_more(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, _ = models([{"docs/api.md": "# API\n"}], [])
+    reviewer = FailsOnceModel("codex", [APPROVE])
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    run.telemetry = Telemetry(tmp_path / "telemetry")
+    outcome = run.execute()
+    assert outcome == Outcome(State.REVIEW, "https://github.com/o/r/pull/9")
+    assert len(reviewer.prompts) == 2
+    assert reviewer.prompts[0] == reviewer.prompts[1]
+    assert "codex failed while reviewing without saying why" in " ".join(run.notes)
+    records = [
+        json.loads(line)
+        for line in next((tmp_path / "telemetry").glob("*.jsonl"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    reviews = [r["outcome"] for r in records if r["stage"] == "review"]
+    assert reviews == ["failed", "approved"]
 
 
 @pytest.mark.parametrize("stop_reason", ["", "timed_out"])

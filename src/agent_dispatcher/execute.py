@@ -310,6 +310,20 @@ def json_reply(text: str) -> dict[str, object] | None:
     return cast("dict[str, object]", value) if isinstance(value, dict) else None
 
 
+def _unexplained_failure(result: RunResult) -> bool:
+    """Say whether a call failed with no reason: no limit, quota or lost evidence.
+
+    Benchmarks saw 5 of 363 calls end this way, each one taking a run with it,
+    so such a call is worth one more try.
+    """
+    return (
+        result.exit_code != 0
+        and not result.stop_reason
+        and not result.exhausted
+        and not result.retention_errors
+    )
+
+
 def _plan_verdict(text: str) -> str:
     """Name a plan reply's outcome for telemetry."""
     _, plan = split_rating(text)
@@ -636,6 +650,9 @@ class Run:
     ) -> str:
         """Run one model call, record it, and stop the run if it failed or ran out.
 
+        A call that failed without a reason (no limit, quota or lost evidence) is
+        tried once more first.
+
         One exception: a coding call (implement or repair, never a CI repair) that
         hit its time limit after making new edits returns normally, and the run is
         marked unfinished so the gate and an informed reviewer judge those edits.
@@ -656,6 +673,7 @@ class Run:
             "format. These restrictions also apply to copies in templates.\n"
         ) + repo_rules(clone)
         before = self.workspace.patch(clone) if kind in _CODING else ""
+        retried = False
         while True:
             tuning = self._tuning(name) if read_only else None
             thinking, working = TURNS[self.level.label]
@@ -675,6 +693,25 @@ class Run:
                 )
             finally:
                 CALL_TIMEOUT.reset(limit)
+            if _unexplained_failure(result) and not retried:
+                # Usually a provider or transport error. The clone keeps any
+                # edits, so a coding call picks up where it was.
+                self._record_call(
+                    kind,
+                    name,
+                    sent,
+                    result,
+                    started,
+                    read_only=read_only,
+                    outcome="failed",
+                    context=context,
+                )
+                retried = True
+                self.notes.append(
+                    f"{name} failed while {stage} without saying why, so the "
+                    "call was tried once more."
+                )
+                continue
             if (
                 result.stop_reason != "max_turns"
                 or self.level is Level.HARD
