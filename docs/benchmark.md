@@ -67,6 +67,11 @@ To compare with the team as it worked before the sandbox, add
 runs in the sandbox. Give each run its own `--first-run-id` range (for example
 91000 and 92000) so their telemetry never mixes.
 
+A run takes hours. On Windows the benchmark process keeps the PC from idle
+sleep until it ends, as `scripts/cycle-awake.ps1` does for scheduled cycles: a
+sleep in the middle of a call would run the clock out on its task. It doesn't
+stop a manual sleep, a closed lid or a restart.
+
 Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.

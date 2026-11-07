@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_dispatcher import cli
+from agent_dispatcher.awake import kept_awake
 from agent_dispatcher.dispatcher import choose_team
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.publish import GitHubWriter
@@ -301,21 +302,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     root = arguments.root.resolve()
     results: list[dict[str, object]] = []
-    for index, task in enumerate(tasks):
-        if arguments.command == "validate":
-            result = validate(task, sandbox, root)
-        else:
-            result = attempt(
-                task,
-                settings,
-                root,
-                arguments.first_run_id + index,
-                sandbox,
-                team_sandbox=arguments.team_sandbox == "on",
-            )
-        results.append(result)
-        sys.stdout.write(json.dumps(result) + "\n")
-        sys.stdout.flush()
+    # Hours of model calls; a sleep in the middle would fail the run.
+    with kept_awake():
+        for index, task in enumerate(tasks):
+            if arguments.command == "validate":
+                result = validate(task, sandbox, root)
+            else:
+                result = attempt(
+                    task,
+                    settings,
+                    root,
+                    arguments.first_run_id + index,
+                    sandbox,
+                    team_sandbox=arguments.team_sandbox == "on",
+                )
+            results.append(result)
+            sys.stdout.write(json.dumps(result) + "\n")
+            sys.stdout.flush()
     if arguments.command == "run":
         resolved = sum(bool(result["resolved"]) for result in results)
         sys.stdout.write(
