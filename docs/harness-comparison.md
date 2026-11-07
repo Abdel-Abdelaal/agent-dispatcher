@@ -33,7 +33,9 @@ it wrote by emptying it: after every coding call the controller deletes the new
 files left empty, except `__init__.py`, `py.typed` and `.gitkeep`. Every coding
 call is told the diff caps. When a change is over them after the checks, the
 worker gets one call to shrink it, and the checks run again; the gate's caps are
-unchanged and it still refuses what stays too big. A planner that reaches its step cap is made to
+unchanged and it still refuses what stays too big. A call that fails without a
+reason (no time, turn or output limit, no spent quota, no lost evidence) is tried
+once more, since a provider or transport error would otherwise end the run. A planner that reaches its step cap is made to
 summarise without tools, so its reply is often notes on what it read; it gets one
 tool-free turn to turn those notes into numbered steps, and keeps the notes if that
 reply is unusable.
