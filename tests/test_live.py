@@ -1056,6 +1056,29 @@ def test_json_reply_finds_the_object_or_nothing() -> None:
     assert json_reply("[{}]") == {}
 
 
+def test_json_reply_reads_a_verdict_after_prose_that_quotes_braces() -> None:
+    # Benchmark run 101015: an approving review lost as unreadable JSON.
+    verdict = {
+        "approve": True,
+        "summary": "Scrubs {fence} markers.",
+        "findings": [],
+        "requirements": [{"requirement": "R1", "met": True}],
+    }
+    reply = (
+        "Checked: `_findings_text` emits `- {NO_FINDINGS}` plus the "
+        "`{stripped}` summary.\n\n" + json.dumps(verdict)
+    )
+    assert json_reply(reply) == verdict
+    assert approves(json_reply(reply) or {})
+    # Objects nested in the verdict never stand in for it.
+    assert json_reply("{x} " + json.dumps({"a": {"b": 1}})) == {"a": {"b": 1}}
+    # The last whole object wins; prose braces alone are still nothing.
+    assert json_reply('{"approve": true} then {name} {"approve": false}') == {
+        "approve": False
+    }
+    assert json_reply("{name} and {other}") is None
+
+
 def test_review_format_retry_is_read_only_not_a_code_repair(
     tmp_path: Path, origin: Path
 ) -> None:

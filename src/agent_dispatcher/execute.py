@@ -323,15 +323,41 @@ def pr_title(issue: Issue) -> str:
 
 
 def json_reply(text: str) -> dict[str, object] | None:
-    """Return the first JSON object in a model's reply, or None if there isn't one."""
+    """Return the JSON object in a model's reply, or None if there isn't one.
+
+    The reply from its first "{" to its last "}" is tried first. If that isn't
+    JSON (prose around the object quoted code such as "{name}"), the last whole
+    object in the reply is used: in a benchmark a reviewer approved in prose,
+    ended with a valid verdict, and the run was lost as unreadable.
+    """
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         return None
     try:
         value: object = json.loads(text[start : end + 1])
     except json.JSONDecodeError:
-        return None
+        value = _last_object(text)
     return cast("dict[str, object]", value) if isinstance(value, dict) else None
+
+
+def _last_object(text: str) -> object:
+    """Return the last top-level JSON object in `text`, or None.
+
+    Objects nested in one already found are skipped, so a verdict's inner
+    objects never stand in for the verdict.
+    """
+    decoder = json.JSONDecoder()
+    found: object = None
+    at = text.find("{")
+    while at >= 0:
+        try:
+            value, end = decoder.raw_decode(text, at)
+        except json.JSONDecodeError:
+            at = text.find("{", at + 1)
+            continue
+        found = value  # Decoding from "{" only ever yields an object.
+        at = text.find("{", end)
+    return found
 
 
 def _unexplained_failure(result: RunResult) -> bool:
