@@ -165,6 +165,14 @@ The controller can attempt one repair of failed required CI, or of the shared
 hook and lint checks, when no task is waiting. A second failure needs
 investigation rather than an unlimited retry loop. Do not weaken tests or protections to get a green result.
 
+To ask for a change on an agent PR, comment `/fix` followed by what to change,
+for example `/fix return 404, not 400, for an unknown code`. The worker makes
+that change on the PR's branch, the other model reviews it against your request,
+and the controller pushes it only if the gate and the review pass; a comment on
+the PR says how it went. Only the owner's comments count. Each comment gets one
+run, owner requests come before CI repairs, and a PR gets at most three: past
+that, edit the branch yourself or start a new task.
+
 An invalid review verdict gets one formatting retry by the read-only reviewer.
 It never authorizes a code edit or counts as approval. The retry gets the first
 reply as notes and three steps to turn them into a verdict, not a fresh review;
