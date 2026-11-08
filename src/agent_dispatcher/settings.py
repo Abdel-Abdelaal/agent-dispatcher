@@ -137,6 +137,10 @@ class Settings(BaseSettings):
     # Experiment: let easy documentation tasks go straight to the worker. The
     # review still checks the change. Compare telemetry before keeping it on.
     skip_plan_for_easy_docs: bool = False
+    # Worker changes made from the plan on a hard task when the sandbox can check
+    # them; the controller keeps one. Each extra costs about one more hard coding
+    # call's tokens. 1 turns it off.
+    hard_candidates: int = Field(default=2, ge=1, le=3)
     # Thinking (plan, review) follows the task's level: see levels.DEFAULT_LADDER.
     # Override with JSON, e.g. {"claude": {"hard": ["claude-opus-5-5", "max"]}}.
     thinking_ladder: dict[str, dict[str, tuple[str, str]]] = Field(

@@ -50,6 +50,7 @@ No upstream source code is copied into this repository.
 | Keep a scanned excerpt of why a call failed | #95 | none found | n/a | our own | yes |
 | Reviewer lists each stated requirement as met or not | #99 | [PR-Agent](https://github.com/The-PR-Agent/pr-agent) ticket compliance (`ticket_requirements`, `fully_compliant_requirements`, `not_compliant_requirements`) | MIT | same shape; ours differs in that the controller, not the model, turns any unmet requirement into a rejection | later |
 | Read a JSON verdict that follows prose | #100 | PR-Agent's fallback YAML parsing of model replies; [json_repair](https://github.com/mangiucugna/json_repair) | MIT, MIT | from PR-Agent, the idea of fallbacks after the strict parse; json_repair not adopted (below) | later |
+| Two candidate changes on hard tasks; the controller keeps one | #102 | [Agentless](https://github.com/OpenAutoCoder/Agentless) patch selection (regression and reproduction tests, then majority vote over normalized patches), the reproduction-test selection of [CodeMonkeys](https://arxiv.org/abs/2501.14723), sampling results from [SWE-Replay](https://arxiv.org/pdf/2601.22129) and [SWE-HERO](https://arxiv.org/pdf/2604.01496) | MIT (Agentless) | the design: filter by the repository's checks, then run each candidate's own tests against the other; no code. With two candidates a vote decides nothing, so size breaks ties | yes |
 | Treat a reply cut at the output limit as unfinished | #86 | not checked | n/a | our own | no |
 | Turn a capped planner's notes into a plan | #87 | not checked | n/a | our own | no |
 | Keep edits at the hard turn cap; delete files the worker emptied | #91 | not checked | n/a | our own | no |
@@ -64,6 +65,7 @@ No upstream source code is copied into this repository.
 | OpenCode structured output (schema-validated final answer with retries) | MIT | Exists in the OpenCode SDK and server API, not in `opencode run` 1.18.35, which the controller uses. Revisit if the worker moves to the server API; it would replace both #100's fallback and the format retry. |
 | PR-Agent's third bucket, "requires further human verification" | MIT | A run has no human in the loop before the PR; an unverifiable requirement is better counted as unmet. Revisit if reviewers start marking verifiable ones unmet. |
 | OpenHands, Goose, LangGraph, Letta, elizaOS as frameworks | MIT / Apache-2.0 | See [research 8 Nov](harness-research-2026-11-08.md): no score gain for the code we would have to keep safe. |
+| A trained critic model to pick the candidate ([OpenHands critic](https://openhands.dev/blog/sota-on-swe-bench-verified-with-inference-time-scaling-and-critic-model), [critic rubrics](https://arxiv.org/pdf/2603.03800)) | MIT (code); model weights on Hugging Face | Needs a GPU-served model we don't run, and its scores come from other models' trajectories. Our tests-first choice is deterministic. Revisit if two candidates often tie on every test signal. |
 | Language-server diagnostics on every edit (OpenCode LSP, Aider lint-on-edit) | MIT / Apache-2.0 | Servers would run on the host outside the sandbox; the worker already runs ruff and pyright in it ([research 6 Nov](harness-research-2026-11-06.md)). |
 
 ## Open candidates
@@ -72,7 +74,7 @@ Each waits on evidence from a benchmark trace or on Abdel's decision.
 
 | Candidate | Source | Waiting on |
 | --- | --- | --- |
-| Best of N patches on hard tasks, picked by our checks | [Agentless](https://github.com/OpenAutoCoder/Agentless), [SWE-Replay](https://arxiv.org/pdf/2601.22129) | Abdel's go-ahead on token spend (roughly doubles hard tasks) |
+| More than two candidates, or candidates below hard | Agentless (up to 40 samples), SWE-Replay (10) | a benchmark showing two candidates help, and the token cost per extra one |
 | Context condensing for long calls | [OpenHands](https://github.com/OpenHands/software-agent-sdk) condenser | traces showing continued calls failing for lost context |
 | Repository symbol map in the prompt | [Aider repo map](https://github.com/Aider-AI/aider) (Apache-2.0) | traces showing turns spent finding code |
 | Stop repeated identical tool calls | OpenCode's repeated-call guard | a test that our deny-by-default config already covers it |
