@@ -35,8 +35,9 @@ writes ever runs on the controller's host, because that host holds credentials.
     order, the one that changed something, fits the gate's limits, passes the
     checks, passes more of the other's tests, finished, and is smaller; a tie
     keeps the first. Only the kept candidate goes to the gate and the reviewer.
-    The second candidate starts only when a full hard coding call, the review
-    and a repair still fit before the run's deadline. A candidate whose calls
+    The second candidate starts when a 30-minute coding call, the review and a
+    repair still fit before the run's deadline; its calls end 25 minutes early,
+    so the review and a repair keep their time. A candidate whose calls
     fail is left out; a spent quota still parks the run. Without the sandbox or
     a lockfile there is nothing to choose with, so there is one candidate.
 

@@ -217,9 +217,13 @@ WORK_SECONDS = {"easy": 20 * 60, "medium": 30 * 60, "hard": 40 * 60}
 DEADLINE_RESERVE = timedelta(minutes=15)
 # A call given less time than this can't finish useful work, so the run stops.
 MIN_CALL_SECONDS = 4 * 60
-# A hard task's extra candidates start only with this much of the run left after
-# a full hard coding call, so the review and one repair still fit after them.
+# A hard task's extra candidates keep this much of the run back for the review
+# and one repair: their calls end this long before the usual reserve.
 CANDIDATE_RESERVE = timedelta(minutes=25)
+# The least time an extra candidate's coding call gets. In benchmark 8 second
+# candidates took 6 to 8 minutes, while waiting for room for a full 40-minute
+# hard call skipped them on tasks raised to hard late, which most need them.
+CANDIDATE_CALL = timedelta(seconds=WORK_SECONDS["medium"])
 # Test files a candidate added or changed; the other candidates run them.
 _TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
 # Larger test files are left out of the cross-check rather than copied.
@@ -640,6 +644,9 @@ class Run:
     calls: int = field(default=0, init=False)
     tokens: int = field(default=0, init=False)
     model_ms: int = field(default=0, init=False)
+    # Kept back before the deadline when a call's time is set; extra candidates
+    # keep more, so the review still fits after them.
+    _reserve: timedelta = field(default=DEADLINE_RESERVE, init=False)
     _authority_denied: bool = field(default=False, init=False)
 
     def _check_authority(self, expected: State) -> bool:
@@ -924,7 +931,7 @@ class Run:
         limit = STEP_TIMEOUT_SECONDS if read_only else WORK_SECONDS[self.level.label]
         if self.deadline is None:
             return limit
-        left = (self.deadline - DEADLINE_RESERVE - datetime.now(UTC)).total_seconds()
+        left = (self.deadline - self._reserve - datetime.now(UTC)).total_seconds()
         if left < MIN_CALL_SECONDS:
             raise Stop(
                 self._failure(f"The run's time ran out before {name} started {stage}.")
@@ -1531,12 +1538,11 @@ class Run:
         self.shrunk = candidate.shrunk
 
     def _time_for_candidate(self) -> bool:
-        """Say whether a full hard coding call, the review and a repair still fit."""
+        """Say whether a candidate's coding call, the review and a repair still fit."""
         if self.deadline is None:
             return True
         left = self.deadline - DEADLINE_RESERVE - datetime.now(UTC)
-        call = timedelta(seconds=WORK_SECONDS[Level.HARD.label])
-        return left >= call + CANDIDATE_RESERVE
+        return left >= CANDIDATE_CALL + CANDIDATE_RESERVE
 
     def _best_candidate(self, first: Path, plan: str) -> Path:
         """On a hard task, make more candidates from the plan and keep the best.
@@ -1570,6 +1576,7 @@ class Run:
             )
             clone = self.workspace.clone(url, f"run-{self.run_id}-agent-{number}")
             self.checks, self.unfinished, self.shrunk = None, False, False
+            self._reserve = DEADLINE_RESERVE + CANDIDATE_RESERVE
             try:
                 self._candidate(clone, plan)
             except Stop as stop:
@@ -1580,6 +1587,8 @@ class Run:
                     f"Candidate {number} stopped and is left out: {reason}"
                 )
                 break
+            finally:
+                self._reserve = DEADLINE_RESERVE
             pool.append(self._snapshot(clone))
         self.candidates = len(pool)
         chosen = self._choose(pool)
