@@ -48,6 +48,7 @@ from agent_dispatcher.providers import (
 from agent_dispatcher.publish import GitHubWriter, PublishError, error_lines
 from agent_dispatcher.queue import RunQueue, Task
 from agent_dispatcher.roles import Team
+from agent_dispatcher.sandbox import SandboxResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.states import InvalidTransitionError, State
 from agent_dispatcher.telemetry import Telemetry, sha256
@@ -416,8 +417,58 @@ def test_a_team_turns_an_issue_into_a_draft_pr(tmp_path: Path, origin: Path) -> 
     body = gh.pr_body()
     assert "**claude** planned, **mimo** implemented, **codex** reviewed" in body
     assert "Plan SHA256:" in body
+    assert "| Model calls | 3 |" in body
+    assert "| Tokens | not reported |" in body
+    assert "| Repository checks | not run (no sandbox) |" in body
     assert "Looks right." not in body
     assert not (tmp_path / "work" / "pwned").exists()
+
+
+def test_the_pr_summary_reports_counts_and_check_results(
+    tmp_path: Path, origin: Path
+) -> None:
+    run = team_run(tmp_path, origin, models([], []), FakeGh())
+    run.calls, run.tokens, run.model_ms = 6, 312_438, 3_921_000
+    run.checks = SandboxResult(0, "ok")
+    summary = run._summary()  # pyright: ignore[reportPrivateUsage]
+    assert summary.startswith("| Run | |\n| --- | --- |\n")
+    assert "| Level | medium |" in summary
+    assert "| Model calls | 6 |" in summary
+    assert "| Tokens | 312,438 |" in summary
+    assert "| Model time | 65 min |" in summary
+    assert "| Repository checks | passed in the sandbox |" in summary
+    run.checks = SandboxResult(1, "boom")
+    assert "| Repository checks | failed in the sandbox |" in run._summary()  # pyright: ignore[reportPrivateUsage]
+    run.baseline = SandboxResult(1, "boom")
+    assert "failing, as they were before this change" in run._summary()  # pyright: ignore[reportPrivateUsage]
+    run.model_ms = 20_000
+    assert "| Model time | under a minute |" in run._summary()  # pyright: ignore[reportPrivateUsage]
+
+
+def test_the_run_counts_each_calls_reported_tokens(
+    tmp_path: Path, origin: Path
+) -> None:
+    run = team_run(tmp_path, origin, models([], []), FakeGh())
+    usage: dict[str, int | float] = {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "reasoning_tokens": 5,
+    }
+    result = RunResult("mimo", 0, "", exhausted=False, usage=usage)
+    started = datetime.now(UTC)
+    run._record_call(  # pyright: ignore[reportPrivateUsage]
+        "plan", "mimo", "prompt", result, started, read_only=True, outcome="ok"
+    )
+    run._record_call(  # pyright: ignore[reportPrivateUsage]
+        "plan",
+        "mimo",
+        "prompt",
+        replace(result, usage=None),
+        started,
+        read_only=True,
+        outcome="ok",
+    )
+    assert (run.calls, run.tokens) == (2, 125)
 
 
 def test_a_rejected_change_gets_one_repair_round(tmp_path: Path, origin: Path) -> None:
