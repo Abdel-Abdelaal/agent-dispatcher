@@ -15,7 +15,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from agent_dispatcher import cli, native_evidence
+from agent_dispatcher import cli, execute, native_evidence
 from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import (
     NO_FINDINGS,
@@ -478,6 +478,49 @@ def test_unmet_requirements_fail_closed() -> None:
     assert not approves(verdict)
     assert not approves({"approve": False, "requirements": []})
     assert not approves({"approve": "true"})
+    for shape in ({"0": {"met": False}}, "all met", 3):
+        malformed: dict[str, object] = {"approve": True, "requirements": shape}
+        assert unmet_requirements(malformed) == [
+            "The review's requirements were not a list, so none could be read."
+        ]
+        assert not approves(malformed)
+    many: dict[str, object] = {
+        "approve": True,
+        "requirements": [{"requirement": f"r{n}", "met": False} for n in range(25)],
+    }
+    capped = unmet_requirements(many)
+    assert len(capped) == 21
+    assert capped[-1] == "5 more unmet requirement(s)"
+
+
+def test_review_telemetry_uses_the_same_approval_rule() -> None:
+    verdict = execute._review_verdict  # pyright: ignore[reportPrivateUsage]
+    contradicts = {"approve": True, "requirements": [{"requirement": "x"}]}
+    assert verdict(json.dumps(contradicts)) == "rejected"
+    assert verdict(APPROVE) == "approved"
+    assert verdict("not json") == "invalid_json"
+
+
+def test_a_rejection_with_unmet_requirements_sends_them_without_a_note(
+    tmp_path: Path, origin: Path
+) -> None:
+    rejects = json.dumps(
+        {
+            "approve": False,
+            "summary": "Missing one.",
+            "requirements": [{"requirement": "keep the order", "met": False}],
+            "findings": ["order changed"],
+        }
+    )
+    planner, worker, reviewer = models(
+        [{"docs/api.md": "# APi\n"}, {"docs/api.md": "# API\n"}], [rejects, APPROVE]
+    )
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    assert run.execute().state is State.REVIEW
+    repair = worker.prompts[1][0]
+    assert "- order changed" in repair
+    assert "- Requirement not met: keep the order" in repair
+    assert not any("counted it as a rejection" in note for note in run.notes)
 
 
 @pytest.mark.parametrize(

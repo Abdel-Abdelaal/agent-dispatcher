@@ -209,6 +209,8 @@ MIN_CALL_SECONDS = 4 * 60
 _CODING = {"implement", "repair"}
 # A requirement a reviewer lists goes back to the worker; one line, not an essay.
 _REQUIREMENT_CHARS = 500
+# At most this many unmet requirements go to the worker, so a long list stays brief.
+_MAX_REQUIREMENTS = 20
 _TITLE_LIMIT = 72
 # Audit issue titles arrive Markdown-escaped and HTML-encoded ("output\_scanner",
 # "&\#x27;"), which a plain-text PR title and its squash commit would keep.
@@ -347,6 +349,8 @@ def unmet_requirements(verdict: Mapping[str, object]) -> list[str]:
     fails closed. A verdict without the list has none to hold against it.
     """
     raw = verdict.get("requirements")
+    if raw is not None and not isinstance(raw, list):
+        return ["The review's requirements were not a list, so none could be read."]
     entries = cast("list[object]", raw) if isinstance(raw, list) else []
     unmet: list[str] = []
     for entry in entries:
@@ -358,6 +362,9 @@ def unmet_requirements(verdict: Mapping[str, object]) -> list[str]:
         else:
             text = str(entry)
         unmet.append(text[:_REQUIREMENT_CHARS])
+    if len(unmet) > _MAX_REQUIREMENTS:
+        rest = len(unmet) - _MAX_REQUIREMENTS
+        unmet = [*unmet[:_MAX_REQUIREMENTS], f"{rest} more unmet requirement(s)"]
     return unmet
 
 
