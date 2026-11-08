@@ -98,6 +98,23 @@ def test_a_scanner_decides_what_is_kept() -> None:
     assert len(str(long["output_excerpt"])) == EXCERPT_CHARS
 
 
+def test_a_failure_keeps_its_scanned_end() -> None:
+    sink = Telemetry(Path("unused"), secrets=[HELD], scanner=passthrough)
+    said = "x" * 3000 + " key " + HELD + " then APIError 502"
+    described = sink.failure(said)
+    assert described["error_chars"] == len(said)
+    assert described["error_excerpt_status"] == "redacted"
+    excerpt = str(described["error_excerpt"])
+    assert excerpt.endswith(REDACTED + " then APIError 502")
+    assert HELD not in excerpt
+    assert sink.failure("")["error_excerpt_status"] == "empty"
+    unscanned = Telemetry(Path("unused")).failure("APIError 502")
+    assert (unscanned["error_excerpt"], unscanned["error_excerpt_status"]) == (
+        None,
+        "omitted_no_scanner",
+    )
+
+
 def test_command_scanner_runs_a_trusted_cli(tmp_path: Path) -> None:
     script = tmp_path / "scan.py"
     script.write_text(

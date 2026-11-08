@@ -10,11 +10,32 @@ import pytest
 from pydantic import SecretStr
 
 from agent_dispatcher import cli, native_evidence, opencode_worker
-from agent_dispatcher.opencode_worker import OpenCodeWorker, events, finish_reason
+from agent_dispatcher.opencode_worker import (
+    OpenCodeWorker,
+    events,
+    failure_detail,
+    finish_reason,
+)
 from agent_dispatcher.providers import RunResult
 from agent_dispatcher.settings import Settings
 from agent_dispatcher.telemetry import sha256
 from agent_dispatcher.workspace import GitError
+
+
+def test_a_failure_is_described_by_stderr_and_error_events_only() -> None:
+    error = {
+        "type": "error",
+        "error": {"name": "APIError", "data": {"statusCode": 502}},
+    }
+    output = "\n".join(
+        [
+            json.dumps({"type": "text", "part": {"text": "long tool output"}}),
+            json.dumps(error),
+        ]
+    )
+    assert failure_detail(output, "  boom\n") == "boom\n" + json.dumps(error)
+    assert failure_detail(output, "") == json.dumps(error)
+    assert failure_detail("plain", "") == ""
 
 
 def test_event_parser_keeps_final_reply_and_known_usage() -> None:
