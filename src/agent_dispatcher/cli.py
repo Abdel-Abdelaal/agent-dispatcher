@@ -243,6 +243,8 @@ def record_routing(
 
 # One CI repair per agent PR: if that doesn't fix it, a human should look.
 MAX_CI_REPAIRS = 1
+# Owner `/fix` requests per agent PR: past this, the PR needs a person or a new task.
+MAX_FIX_REQUESTS = 3
 CYCLE_MARGIN = timedelta(minutes=2)
 
 
@@ -434,6 +436,75 @@ def repair_next(
     return None
 
 
+def follow_up_next(
+    settings: Settings,
+    reader: GitHubReader,
+    queue: RunQueue,
+    client: httpx.Client,
+    *,
+    cycle_started: datetime | None = None,
+) -> str | None:
+    """Make the change asked for in the oldest new `/fix` comment on an agent PR.
+
+    Only the owner's comments count. Each comment gets one run, and a PR gets
+    at most MAX_FIX_REQUESTS; a request past that is answered on the PR instead.
+    """
+    now = datetime.now(UTC)
+    known = quotas(configured(settings), queue.parked_until())
+    team = choose_team(
+        known,
+        settings.max_weekly_share,
+        now,
+        allow_worker_thinking=settings.allow_worker_thinking,
+        roster=roster(settings),
+    )
+    if team is None:
+        return None
+    for repo in target_repos(settings, reader):
+        for pr in reader.agent_prs(repo):
+            requests = reader.fix_requests(repo, pr.number, settings.owner)
+            new = [r for r in requests if not queue.fix_seen(repo, r.comment_id)]
+            if not new:
+                continue
+            request = new[0]
+            root = work_root(settings)
+            writer = GitHubWriter(subprocess_runner, os.environ, root)
+            if queue.fixes(repo, pr.number) >= MAX_FIX_REQUESTS:
+                queue.record_fix(repo, pr.number, request.comment_id, "REFUSED", now)
+                writer.pr_comment(
+                    repo,
+                    pr.number,
+                    f"agent-dispatcher has made {MAX_FIX_REQUESTS} requested "
+                    "changes on this PR already, so it stops here. Edit the branch "
+                    "yourself, or close the PR and reopen the issue as a new task.",
+                )
+                return f"fix: {repo}#{pr.number} refused, request cap reached"
+            issue = reader.issue(repo, pr.issue)
+            task = Task(repo, pr.issue, issue.title)
+            run_id = queue.start_run(
+                task, "+".join(team.members()), now, lease_id=settings.run_lease_id
+            )
+            queue.record_fix(repo, pr.number, request.comment_id, "STARTED", now)
+            record_routing(settings, queue, team, run_id, task)
+            outcome = Outcome(State.FAILED, "controller error")
+            try:
+                run = make_run(
+                    settings,
+                    issue,
+                    run_id=run_id,
+                    team=team,
+                    client=client,
+                    root=root,
+                    cycle_started=cycle_started,
+                )
+                outcome = run.follow_up(pr, request.text)
+            finally:
+                finish(queue, run_id, outcome, settings, now)
+                queue.finish_fix(repo, request.comment_id, outcome.state.name, now)
+            return f"fix: {repo}#{pr.number} {outcome.state} {outcome.detail}"
+    return None
+
+
 def status(queue: RunQueue, now: datetime) -> str:
     """Return the local state: waiting tasks, parked providers and recent runs."""
     waiting = queue.waiting()
@@ -560,11 +631,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if outcome is not None:
                     sys.stdout.write(f"result: {outcome.state} {outcome.detail}\n")
                 else:
-                    repaired = repair_next(
+                    # The owner's own requests come before CI repairs.
+                    updated = follow_up_next(
+                        settings, reader, queue, client, cycle_started=cycle_started
+                    ) or repair_next(
                         settings, reader, queue, client, cycle_started=cycle_started
                     )
-                    if repaired is not None:
-                        sys.stdout.write(f"{repaired}\n")
+                    if updated is not None:
+                        sys.stdout.write(f"{updated}\n")
     finally:
         queue.close()
     return 0

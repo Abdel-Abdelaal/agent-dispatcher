@@ -28,7 +28,13 @@ from agent_dispatcher.execute import (
     pr_title,
 )
 from agent_dispatcher.gate import Limits
-from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
+from agent_dispatcher.github import (
+    AgentPr,
+    FailedCheck,
+    FixRequest,
+    GitHubReader,
+    fix_request,
+)
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.levels import DEFAULT_LADDER, Level
 from agent_dispatcher.opencode_worker import OpenCodeWorker
@@ -1322,7 +1328,7 @@ def test_a_rejected_repair_is_reported_and_not_pushed(
     assert outcome.state is State.FAILED
     assert git(origin, "rev-parse", "agent/7-run-3").strip() == pr.sha
     comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
-    assert "rejected the repair" in comment
+    assert "rejected the change" in comment
 
 
 def test_a_timed_out_ci_repair_with_edits_still_fails_closed(
@@ -2465,3 +2471,146 @@ def test_revoked_task_skips_quota_cleanup_but_preserves_provider_park(
     assert checks == [State.READY, State.RUNNING]
     assert gh.labels() == [("agent:ready", "agent:running")]
     assert not gh.comments()
+
+
+def test_an_owner_request_is_applied_on_the_same_branch(
+    tmp_path: Path, origin: Path
+) -> None:
+    pr = published_pr(tmp_path, origin)
+    worker = FakeModel("claude", edits=[{"docs/api.md": "# API\n\nRequested.\n"}])
+    reviewer = FakeModel("codex", [APPROVE])
+    run, gh = repair_run(tmp_path, origin, worker, reviewer)
+    outcome = run.follow_up(pr, "Say Requested in the API doc.")
+    assert outcome.state is State.REVIEW
+    assert "<<<OWNER_REQUEST>>>\nSay Requested in the API doc." in worker.prompts[0][0]
+    assert worker.prompts[0][1] is False
+    review = reviewer.prompts[0][0]
+    assert "the repository owner asked for" in review
+    assert "Say Requested in the API doc." in review
+    log = git(origin, "log", "--format=%s", "agent/7-run-3")
+    assert log.splitlines()[0] == "fix: apply the owner's review request for #7"
+    assert git(origin, "show", "agent/7-run-3:docs/api.md") == "# API\n\nRequested.\n"
+    comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
+    assert "pushed the requested change" in comment
+    assert gh.labels() == []
+
+
+def test_a_rejected_request_is_reported_and_not_pushed(
+    tmp_path: Path, origin: Path
+) -> None:
+    pr = published_pr(tmp_path, origin)
+    worker = FakeModel("claude", edits=[{"docs/api.md": "broken\n"}])
+    run, gh = repair_run(tmp_path, origin, worker, FakeModel("codex", [REJECT]))
+    outcome = run.follow_up(pr, "Rewrite the doc.")
+    assert outcome.state is State.FAILED
+    assert git(origin, "rev-parse", "agent/7-run-3").strip() == pr.sha
+    comment = next(stdin for argv, stdin in gh.calls if argv[1:3] == ["pr", "comment"])
+    assert "rejected the change" in comment
+
+
+def comment_row(
+    body: str,
+    login: str = "Abdel-Abdelaal",
+    association: str = "OWNER",
+    kind: str = "User",
+    number: int = 5,
+) -> dict[str, object]:
+    return {
+        "id": number,
+        "body": body,
+        "user": {"login": login, "type": kind},
+        "author_association": association,
+    }
+
+
+def test_only_the_owners_fix_comments_are_requests() -> None:
+    owner = "Abdel-Abdelaal"
+    assert fix_request(comment_row("/fix rename x to y"), owner) == FixRequest(
+        5, "rename x to y"
+    )
+    multi = fix_request(comment_row("/fix\nfirst line\nsecond line"), owner)
+    assert multi == FixRequest(5, "first line\nsecond line")
+    long = fix_request(comment_row("/fix " + "z" * 9000), owner)
+    assert long is not None
+    assert len(long.text) == 4000
+    for row in (
+        comment_row("/fix rename", login="someone-else"),
+        comment_row("/fix rename", association="COLLABORATOR"),
+        comment_row("/fix rename", kind="Bot"),
+        comment_row("/fix"),
+        comment_row("/fix   "),
+        comment_row("/fixes rename"),
+        comment_row("please /fix rename"),
+        comment_row("Draft PR for review"),
+    ):
+        assert fix_request(row, owner) is None
+
+
+class FixReader(FakeReader):
+    def __init__(self, requests: list[FixRequest]) -> None:
+        super().__init__(None)
+        self.requests = requests
+
+    def fix_requests(self, repo: str, pr: int, owner: str) -> list[FixRequest]:
+        del repo, pr
+        assert owner == "Abdel-Abdelaal"
+        return self.requests
+
+
+def test_follow_up_next_runs_each_request_once_and_caps_a_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    applied: list[str] = []
+    comments: list[str] = []
+
+    class FakeRun:
+        def follow_up(self, pr: AgentPr, request: str) -> cli.Outcome:
+            assert pr.number == 9
+            applied.append(request)
+            return cli.Outcome(State.REVIEW, "done")
+
+    class Writer:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def pr_comment(self, repo: str, number: int, body: str) -> None:
+            assert (repo, number) == ("o/r", 9)
+            comments.append(body)
+
+    def fake_make_run(*_: object, **__: object) -> FakeRun:
+        return FakeRun()
+
+    monkeypatch.setattr(cli, "make_run", fake_make_run)
+    monkeypatch.setattr(cli, "GitHubWriter", Writer)
+    settings = Settings(repos=["o/r"], work_root=tmp_path / "runs", mimo_api_key=None)
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    requests = [FixRequest(n, f"change {n}") for n in range(1, 5)]
+    reader = FixReader(requests)
+    with httpx.Client() as client:
+        for n in range(1, 4):
+            result = cli.follow_up_next(settings, reader, queue, client)  # pyright: ignore[reportArgumentType]
+            assert result == "fix: o/r#9 agent:review done"
+            assert applied[-1] == f"change {n}"
+        refused = cli.follow_up_next(settings, reader, queue, client)  # pyright: ignore[reportArgumentType]
+        assert refused == "fix: o/r#9 refused, request cap reached"
+        assert len(applied) == 3
+        assert "stops here" in comments[0]
+        assert cli.follow_up_next(settings, reader, queue, client) is None  # pyright: ignore[reportArgumentType]
+        assert len(comments) == 1
+    assert queue.fixes("o/r", 9) == 4
+    assert queue.fix_seen("o/r", 4)
+    queue.close()
+
+
+def test_follow_up_next_does_nothing_without_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_run(*_: object, **__: object) -> None:
+        raise AssertionError
+
+    monkeypatch.setattr(cli, "make_run", no_run)
+    settings = Settings(repos=["o/r"], work_root=tmp_path / "runs", mimo_api_key=None)
+    queue = RunQueue(tmp_path / "q.sqlite3")
+    with httpx.Client() as client:
+        assert cli.follow_up_next(settings, FixReader([]), queue, client) is None  # pyright: ignore[reportArgumentType]
+    queue.close()

@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS repairs (
     outcome TEXT NOT NULL,
     at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS fix_requests (
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    comment_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (repo, comment_id)
+);
 CREATE TABLE IF NOT EXISTS parked_providers (
     provider TEXT PRIMARY KEY,
     until TEXT NOT NULL
@@ -190,6 +198,39 @@ class RunQueue:
         self._db.execute(
             "UPDATE repairs SET outcome=?,at=? WHERE rowid=?",
             (outcome, now.isoformat(), attempt),
+        )
+
+    def fixes(self, repo: str, pr: int) -> int:
+        """Return how many `/fix` requests a PR has had a run for."""
+        row = self._db.execute(
+            "SELECT COUNT(*) FROM fix_requests WHERE repo = ? AND pr = ?", (repo, pr)
+        ).fetchone()
+        return int(row[0])
+
+    def fix_seen(self, repo: str, comment_id: int) -> bool:
+        """Say whether a `/fix` comment already had its run (or was refused one)."""
+        row = self._db.execute(
+            "SELECT 1 FROM fix_requests WHERE repo = ? AND comment_id = ?",
+            (repo, comment_id),
+        ).fetchone()
+        return row is not None
+
+    def record_fix(
+        self, repo: str, pr: int, comment_id: int, outcome: str, now: datetime
+    ) -> None:
+        """Remember a `/fix` comment, so it never starts a second run."""
+        self._db.execute(
+            "INSERT INTO fix_requests VALUES (?, ?, ?, ?, ?)",
+            (repo, pr, comment_id, outcome, now.isoformat()),
+        )
+
+    def finish_fix(
+        self, repo: str, comment_id: int, outcome: str, now: datetime
+    ) -> None:
+        """Record how a `/fix` run ended; interruption never refunds the request."""
+        self._db.execute(
+            "UPDATE fix_requests SET outcome=?,at=? WHERE repo=? AND comment_id=?",
+            (outcome, now.isoformat(), repo, comment_id),
         )
 
     def waiting(self) -> list[Task]:
