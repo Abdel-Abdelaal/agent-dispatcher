@@ -3,19 +3,27 @@
 import io
 import json
 import tarfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from agent_dispatcher.execute import DEADLINE_RESERVE, Run, changed_tests
+from agent_dispatcher.execute import (
+    CANDIDATE_CALL,
+    CANDIDATE_RESERVE,
+    DEADLINE_RESERVE,
+    WORK_SECONDS,
+    Run,
+    changed_tests,
+)
 from agent_dispatcher.levels import Level
 from agent_dispatcher.providers import RunResult, Tuning
 from agent_dispatcher.sandbox import COMMAND_FILE, STARTED, Sandbox, pytest_command
 from agent_dispatcher.states import State
 from agent_dispatcher.telemetry import Telemetry
-from test_live import APPROVE, FakeGh, FakeModel, git, team_run
+from test_live import APPROVE, REJECT, FakeGh, FakeModel, git, team_run
 from test_run_checks import make_origin
+from test_time_budget import Timed
 
 
 class TreeDocker:
@@ -275,6 +283,49 @@ def test_no_extra_candidate_when_time_is_short(tmp_path: Path, origin: Path) -> 
     run.deadline = datetime.now(UTC) + DEADLINE_RESERVE + (DEADLINE_RESERVE * 2)
     assert run.execute().state is State.REVIEW
     assert len([p for p in worker.prompts if not p[1]]) == 1
+    assert "Too little of the run's time is left for candidate 2." in run.notes
+
+
+def test_an_extra_candidate_runs_in_less_than_a_full_hard_call(
+    tmp_path: Path, origin: Path
+) -> None:
+    # 60 minutes left: too little for a full 40-minute call plus the review's 25,
+    # enough for a shorter call that still leaves the review its time.
+    worker = Timed("mimo", edits=[GOOD, BAD])
+    run, _, _ = hard_run(tmp_path, origin, worker, TreeDocker())
+    run.deadline = datetime.now(UTC) + DEADLINE_RESERVE + timedelta(minutes=60)
+    assert run.execute().state is State.REVIEW
+    assert run.candidates == 2
+    first, second = worker.limits[0], worker.limits[1]
+    assert first == WORK_SECONDS["hard"]
+    left = timedelta(minutes=60) - CANDIDATE_RESERVE
+    assert left.total_seconds() - 60 < second <= left.total_seconds()
+
+
+def test_calls_after_the_extra_candidates_get_the_usual_reserve(
+    tmp_path: Path, origin: Path
+) -> None:
+    # The review asks for a repair; the repair call may use the time the extra
+    # candidate had to leave free, so it gets a full hard call again.
+    worker = Timed("mimo", edits=[GOOD, BAD, {"calc.py": "good, fixed\n"}])
+    run, reviewer, _ = hard_run(tmp_path, origin, worker, TreeDocker())
+    reviewer.replies = [REJECT, APPROVE]
+    run.deadline = datetime.now(UTC) + DEADLINE_RESERVE + timedelta(minutes=60)
+    assert run.execute().state is State.REVIEW
+    assert run.candidates == 2
+    assert worker.limits[-1] == WORK_SECONDS["hard"]
+    assert published(origin, run, "calc.py") == "good, fixed\n"
+
+
+def test_no_extra_candidate_without_time_for_a_shorter_call(
+    tmp_path: Path, origin: Path
+) -> None:
+    worker = FakeModel("mimo", edits=[GOOD, BAD])
+    run, _, _ = hard_run(tmp_path, origin, worker, TreeDocker())
+    short = CANDIDATE_CALL + CANDIDATE_RESERVE - timedelta(minutes=2)
+    run.deadline = datetime.now(UTC) + DEADLINE_RESERVE + short
+    assert run.execute().state is State.REVIEW
+    assert run.candidates == 1
     assert "Too little of the run's time is left for candidate 2." in run.notes
 
 
