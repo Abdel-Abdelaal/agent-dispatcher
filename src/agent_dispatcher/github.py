@@ -1,6 +1,7 @@
 """Read-only GitHub access for polling. Writes come later, through the App."""
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -30,6 +31,39 @@ class AgentPr:
     sha: str
     issue: int
     base: str = "main"
+
+
+@dataclass(frozen=True)
+class FixRequest:
+    """An owner's `/fix <what to change>` comment on an agent PR."""
+
+    comment_id: int
+    text: str
+
+
+# The owner writes `/fix` and then what to change, on an agent PR.
+_FIX = re.compile(r"/fix\s+(?P<text>\S.*)", re.DOTALL)
+# A request longer than this is cut: it's a review note, not a new task.
+MAX_FIX_CHARS = 4000
+
+
+def fix_request(row: Mapping[str, Any], owner: str) -> FixRequest | None:
+    """Read one PR comment as a `/fix` request, if the owner wrote one.
+
+    Only the owner's own comments count, matched on the login and on GitHub's own
+    record that the author owns the repository: a request from anyone else, or an
+    empty `/fix`, is ignored.
+    """
+    user: Mapping[str, Any] = row.get("user") or {}
+    match = _FIX.fullmatch(str(row.get("body") or "").strip())
+    if (
+        match is None
+        or user.get("login") != owner
+        or user.get("type") != "User"
+        or row.get("author_association") != "OWNER"
+    ):
+        return None
+    return FixRequest(int(row["id"]), match["text"].strip()[:MAX_FIX_CHARS])
 
 
 @dataclass(frozen=True)
@@ -158,6 +192,12 @@ class GitHubReader:
                     AgentPr(row["number"], head["ref"], head["sha"], issue, base)
                 )
         return prs
+
+    def fix_requests(self, repo: str, pr: int, owner: str) -> list[FixRequest]:
+        """Return the owner's `/fix` comments on a PR, oldest first."""
+        rows = self._get(f"/repos/{repo}/issues/{pr}/comments", {"per_page": 100})
+        found = (fix_request(row, owner) for row in rows)
+        return [request for request in found if request is not None]
 
     def required_checks(self, repo: str, branch: str) -> set[str]:
         """Return the checks the branch's rulesets require; empty if unreadable."""
