@@ -23,11 +23,28 @@ pass on its change.
 | `pw-agent-privacy-metadata` | platform-workflows | 2 files, 54 lines |
 | `pw-provider-key-redaction` | platform-workflows | 2 files, 58 lines |
 | `pw-analysis-budget-retries` | platform-workflows | 2 files, 93 lines |
+| `pw-experiment-profile-cli` | platform-workflows | 1 file, 45 lines |
+| `pw-experiment-budgets` | platform-workflows | 1 file, 109 lines |
+| `pw-context-languages` | platform-workflows | 1 file, 50 lines |
+| `pw-context-priority` | platform-workflows | 1 file, 105 lines |
+| `pw-bounded-retries` | platform-workflows | 1 file, 79 lines (much of it re-indentation) |
+| `pw-dsse-archive` | platform-workflows | 2 files, 48 lines |
+| `ad-requeue-finished` | agent-dispatcher | 1 file, 32 lines |
+| `ad-ci-error-lines` | agent-dispatcher | 1 file, 30 lines |
+| `ad-actions-job-links` | agent-dispatcher | 3 files, 57 lines |
+| `ad-pr-title-acronyms` | agent-dispatcher | 1 file, 10 lines |
+| `ad-fence-scrub` | agent-dispatcher | 1 file, 25 lines |
+| `ad-sandbox-failure-detail` | agent-dispatcher | 3 files, 28 lines |
 
 The first four use the audit issue each fix closed, word for word: the same
-input the team got in production. The other nine have written statements that
+input the team got in production. The other 21 have written statements that
 describe the problem and the interface their tests use (names, arguments,
 exact values), never the implementation, as SWE-bench Verified requires.
+
+The `ad-` tasks are fixes to this repository. The team works on a checkout of
+the commit before each fix, offline like every other task, so the installed
+controller is never touched. `pw-dsse-archive`'s tests call the `openssl` CLI,
+which the sandbox image has.
 
 Every task is validated: its hidden tests fail on the commit before the fix and
 pass on the fix, in the sandbox.
@@ -50,6 +67,12 @@ To compare with the team as it worked before the sandbox, add
 runs in the sandbox. Give each run its own `--first-run-id` range (for example
 91000 and 92000) so their telemetry never mixes.
 
+A run takes hours. On Windows the benchmark process asks Windows to keep the
+PC from idle sleep until it ends, as `scripts/cycle-awake.ps1` does for scheduled
+cycles: a sleep in the middle of a call would run the clock out on its task. If
+Windows refuses, a line on stderr says so and the run goes on unprotected. It
+doesn't stop a manual sleep, a closed lid or a restart.
+
 Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.
@@ -66,6 +89,6 @@ tokens, model seconds and calls. A summary line follows.
 ## Cost
 
 Every task is a real team run on the configured providers. MiMo is a paid plan,
-so a full run spends real tokens: today's single runs used 40k to 90k tokens
-each. Run the benchmark deliberately, before and after a change worth measuring,
+so a full run spends real tokens: on 2026-11-05 the 13 original tasks used 1.66M
+tokens together (40k to 280k each), so all 25 take about 3M. Run the benchmark deliberately, before and after a change worth measuring,
 and report the tokens with the result.

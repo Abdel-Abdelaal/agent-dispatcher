@@ -267,6 +267,8 @@ Why these and not others is in
 [ADR 0001](docs/decisions/0001-build-vs-adopt.md).
 The [30 October research review](docs/harness-research-2026-10-30.md) maps
 newer evidence to controlled experiments and records the limits of our claims.
+The [6 November update](docs/harness-research-2026-11-06.md) has the benchmark
+results so far and which harness techniques we take, defer or reject.
 
 ## Contributing
 

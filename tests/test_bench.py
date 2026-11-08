@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agent_dispatcher import bench
+from agent_dispatcher import awake, bench
 from agent_dispatcher.bench import (
     BenchTask,
     checkout,
@@ -197,3 +197,40 @@ def test_the_benchmark_refuses_to_run_without_a_sandbox(
     monkeypatch.setattr(bench, "CHECKOUT", tmp_path)
     assert bench.main(["run", "--tasks", str(path), "--root", str(tmp_path)]) == 2
     assert "DISPATCHER_SANDBOX" in capsys.readouterr().err
+
+
+def test_tool_calls_count_served_and_unavailable_calls(tmp_path: Path) -> None:
+    log = tmp_path / "run-1-sandbox.jsonl"
+    assert bench.tool_calls(log) == {"sandbox_calls": 0, "sandbox_unavailable": 0}
+    log.write_text(
+        '{"exit_code": 0}\n{"outcome": "unavailable", "error": "SandboxError"}\n',
+        encoding="utf-8",
+    )
+    assert bench.tool_calls(log) == {"sandbox_calls": 2, "sandbox_unavailable": 1}
+
+
+def test_tasks_run_with_the_system_held_awake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tasks.json"
+    path.write_text(json.dumps([task("a" * 40).model_dump()]), encoding="utf-8")
+    monkeypatch.setattr(bench, "CHECKOUT", tmp_path)
+
+    def sandbox(_settings: object) -> Sandbox:
+        return Sandbox()
+
+    monkeypatch.setattr(bench.cli, "sandbox", sandbox)
+    calls: list[int] = []
+
+    def setter(flags: int) -> int:
+        calls.append(flags)
+        return 1
+
+    def attempt(*_args: object, **_kwargs: object) -> dict[str, object]:
+        assert len(calls) == 1
+        return {"id": "r-1", "resolved": True}
+
+    monkeypatch.setattr(awake, "windows_setter", lambda: setter)
+    monkeypatch.setattr(bench, "attempt", attempt)
+    assert bench.main(["run", "--tasks", str(path), "--root", str(tmp_path)]) == 0
+    assert len(calls) == 2

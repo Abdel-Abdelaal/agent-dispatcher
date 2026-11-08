@@ -74,6 +74,28 @@ def parse_numstat(text: str) -> list[FileChange]:
     return changes
 
 
+def patch_size(patch: str) -> tuple[int, int]:
+    """Count the files and changed lines in a `git diff` patch, as numstat would.
+
+    Only an early estimate for asking the worker to trim its change: the gate
+    still counts from numstat on a clean clone and has the final word. Header
+    lines before a file's first hunk and binary patch data aren't counted.
+    """
+    files = lines = 0
+    in_hunk = False
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            files += 1
+            in_hunk = False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif line == "GIT binary patch":
+            in_hunk = False
+        elif in_hunk and line[:1] in "+-" and line:
+            lines += 1
+    return files, lines
+
+
 def _normalise(path: str) -> str:
     """Lower-case and use forward slashes, so case or separators dodge nothing."""
     return path.replace("\\", "/").lower()

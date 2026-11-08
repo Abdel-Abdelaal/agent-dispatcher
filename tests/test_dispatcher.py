@@ -159,11 +159,17 @@ def test_cli_live_cycle_runs_the_planned_task(
     monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
     monkeypatch.setattr(cli.httpx, "Client", github_client)
 
-    def fake_run_live(*_: object) -> cli.Outcome:
+    starts: list[object] = []
+
+    def fake_run_live(*_: object, cycle_started: object) -> cli.Outcome:
+        starts.append(cycle_started)
         return cli.Outcome(cli.State.REVIEW, "https://pr")
 
     monkeypatch.setattr(cli, "run_live", fake_run_live)
+    before = datetime.now(UTC)
     assert cli.main(["once"]) == 0
+    assert isinstance(starts[0], datetime)
+    assert before <= starts[0] <= datetime.now(UTC)
     assert capsys.readouterr().out.splitlines()[-1] == (
         "result: agent:review https://pr"
     )
@@ -176,10 +182,11 @@ def test_cli_repairs_when_no_task_is_waiting(
     monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
     monkeypatch.setattr(cli.httpx, "Client", github_client)
 
-    def no_task(*_: object) -> None:
+    def no_task(*_: object, **__: object) -> None:
         return None
 
-    def repaired(*_: object) -> str:
+    def repaired(*_: object, cycle_started: object) -> str:
+        assert isinstance(cycle_started, datetime)
         return "repair: o/r#9 agent:review fixed"
 
     monkeypatch.setattr(cli, "run_live", no_task)
