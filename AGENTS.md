@@ -20,6 +20,9 @@ Follow the [handbook](https://github.com/Abdel-Abdelaal/.github/tree/main/standa
 - Agent runs never receive a GitHub token. Only the controller publishes.
 - Never weaken the protected-path list or the diff caps to make a run pass.
 - No live model call or GitHub write in tests; use the fakes in `tests/`.
+- Before building a feature or fix, look for prior art in open-source harnesses
+  and papers, build on it where it fits, and record what was used or rejected in
+  [docs/prior-art.md](docs/prior-art.md) in the same PR.
 
 ## Glossary
 
