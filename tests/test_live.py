@@ -24,8 +24,10 @@ from agent_dispatcher.execute import (
     Provider,
     Run,
     Stop,
+    approves,
     json_reply,
     pr_title,
+    unmet_requirements,
 )
 from agent_dispatcher.gate import Limits
 from agent_dispatcher.github import AgentPr, FailedCheck, GitHubReader
@@ -427,6 +429,55 @@ def test_a_rejected_change_gets_one_repair_round(tmp_path: Path, origin: Path) -
     rereview = reviewer.prompts[1][0]
     assert "An earlier review rejected this change" in rereview
     assert "<<<PRIOR_FINDINGS>>>\n- typo\n<<<END_PRIOR_FINDINGS>>>" in rereview
+
+
+def test_an_approval_with_an_unmet_requirement_counts_as_a_rejection(
+    tmp_path: Path, origin: Path
+) -> None:
+    contradicts = json.dumps(
+        {
+            "approve": True,
+            "summary": "Fine.",
+            "requirements": [
+                {"requirement": "docs/api.md has an API heading", "met": True},
+                {"requirement": "raw headers kept in order", "met": False},
+            ],
+            "findings": [],
+        }
+    )
+    planner, worker, reviewer = models(
+        [{"docs/api.md": "# APi\n"}, {"docs/api.md": "# API\n"}],
+        [contradicts, APPROVE],
+    )
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome.state is State.REVIEW
+    assert "- Requirement not met: raw headers kept in order" in worker.prompts[1][0]
+    assert "has an API heading" not in worker.prompts[1][0]
+    assert any("counted it as a rejection" in note for note in run.notes)
+    assert '"requirements": [{"requirement"' in reviewer.prompts[0][0]
+
+
+def test_unmet_requirements_fail_closed() -> None:
+    assert unmet_requirements({"approve": True}) == []
+    assert approves({"approve": True, "requirements": []})
+    verdict: dict[str, object] = {
+        "approve": True,
+        "requirements": [
+            {"requirement": "kept", "met": True},
+            {"requirement": "missing", "met": False},
+            {"requirement": "unsure", "met": "yes"},
+            {"requirement": "x" * 900},
+            "a bare string",
+        ],
+    }
+    unmet = unmet_requirements(verdict)
+    assert unmet[:2] == ["missing", "unsure"]
+    assert unmet[2] == "x" * 500
+    assert unmet[3] == "a bare string"
+    assert not approves(verdict)
+    assert not approves({"approve": False, "requirements": []})
+    assert not approves({"approve": "true"})
 
 
 @pytest.mark.parametrize(
