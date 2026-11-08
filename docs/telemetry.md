@@ -44,6 +44,7 @@ comment show why.
 | `available_usage` | null | always null until a provider offers a headless reading; unknown stays unknown |
 | `output_sha256`, `output_chars` | string, integer | the full output's hash and size, always kept |
 | `output_excerpt`, `excerpt_status`, `excerpt_truncated` | string or null, string, boolean | at most 2,000 scanned characters, or `null` with the reason |
+| `error_chars`, `error_excerpt`, `error_excerpt_status` | integer, string or null, string | failed calls only: what the harness said about the failure (its stderr, or OpenCode's error events), its size, and its last 2,000 characters scanned like an output excerpt |
 | `gate_refusals`, `files`, `lines` | list, integer | gate records: each refusal, the changed paths (at most 20), and changed lines |
 | `reason` | string | route records: `parked`, `unused` or `not configured` |
 
@@ -70,6 +71,9 @@ Nothing reaches the file before these rules apply:
 | `omitted_no_scanner` | no scanner configured, so only the hash and length are kept |
 | `omitted_scanner_failed` | the scanner failed, so only the hash and length are kept |
 | `empty` | the model returned no text |
+
+`error_excerpt_status` uses the same values; `empty` there means the harness
+failed without saying anything.
 
 Every record also has `schema_version` (1) and `controller_revision` (the controller
 checkout's git commit, or `unknown`). Output records have `excerpt_truncated`.
