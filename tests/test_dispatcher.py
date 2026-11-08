@@ -190,11 +190,36 @@ def test_cli_repairs_when_no_task_is_waiting(
         return "repair: o/r#9 agent:review fixed"
 
     monkeypatch.setattr(cli, "run_live", no_task)
+    monkeypatch.setattr(cli, "follow_up_next", no_task)
     monkeypatch.setattr(cli, "repair_next", repaired)
     assert cli.main(["once"]) == 0
     assert (
         capsys.readouterr().out.splitlines()[-1] == "repair: o/r#9 agent:review fixed"
     )
+
+
+def test_cli_takes_an_owner_request_before_a_ci_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DISPATCHER_REPOS", "o/r")
+    monkeypatch.setenv("DISPATCHER_DB_PATH", str(tmp_path / "q.sqlite3"))
+    monkeypatch.setattr(cli.httpx, "Client", github_client)
+
+    def no_task(*_: object, **__: object) -> None:
+        return None
+
+    def followed(*_: object, cycle_started: object) -> str:
+        assert isinstance(cycle_started, datetime)
+        return "fix: o/r#9 agent:review done"
+
+    def no_repair(*_: object, **__: object) -> str:
+        raise AssertionError
+
+    monkeypatch.setattr(cli, "run_live", no_task)
+    monkeypatch.setattr(cli, "follow_up_next", followed)
+    monkeypatch.setattr(cli, "repair_next", no_repair)
+    assert cli.main(["once"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "fix: o/r#9 agent:review done"
 
 
 def test_status_shows_waiting_parked_and_recent_runs(tmp_path: Path) -> None:
