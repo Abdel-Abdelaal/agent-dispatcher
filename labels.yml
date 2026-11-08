@@ -1,0 +1,28 @@
+- {"name": "bug", "color": "d73a4a", "description": "Something isn't working"}
+- {"name": "enhancement", "color": "a2eeef", "description": "New feature or request"}
+- {"name": "task", "color": "c5def5", "description": "Refactor, chore or tech debt"}
+- {"name": "documentation", "color": "0075ca", "description": "Docs only"}
+- {"name": "security", "color": "b60205", "description": "Security-related"}
+- {"name": "dependencies", "color": "0366d6", "description": "Dependency updates"}
+- {"name": "governance", "color": "5319e7", "description": "Raised by scheduled audits and drift checks"}
+- {"name": "ai-generated", "color": "fbca04", "description": "Opened or written by an AI tool"}
+- {"name": "priority: critical", "color": "b60205", "description": "Drop everything"}
+- {"name": "priority: high", "color": "d93f0b", "description": "Next up"}
+- {"name": "priority: medium", "color": "fbca04", "description": "Planned"}
+- {"name": "priority: low", "color": "0e8a16", "description": "Nice to have"}
+- {"name": "needs triage", "color": "ededed", "description": "Not yet confirmed or prioritised"}
+- {"name": "blocked", "color": "000000", "description": "Waiting on something else"}
+- {"name": "help wanted", "color": "008672", "description": "Extra attention is needed"}
+- {"name": "good first issue", "color": "7057ff", "description": "Good for newcomers"}
+- {"name": "duplicate", "color": "cfd3d7", "description": "Already exists"}
+- {"name": "wontfix", "color": "ffffff", "description": "Will not be worked on"}
+- {"name": "invalid", "color": "e4e669", "description": "Not a real issue"}
+- {"name": "stale", "color": "eeeeee", "description": "Inactive item awaiting a response before closure"}
+- {"name": "autorelease: pending", "color": "ededed", "description": "Reviewed release PR awaiting release publication"}
+- {"name": "autorelease: tagged", "color": "ededed", "description": "Release PR published and tagged"}
+- {"name": "agent:proposed", "color": "c5def5", "description": "Suggested by an AI audit; the owner adds agent:ready to accept it"}
+- {"name": "agent:ready", "color": "1d76db", "description": "Owner-approved task for agent-dispatcher; only the owner adds it"}
+- {"name": "agent:running", "color": "0e8a16", "description": "agent-dispatcher is working on this task"}
+- {"name": "agent:review", "color": "5319e7", "description": "agent-dispatcher opened a draft PR for review"}
+- {"name": "agent:parked", "color": "fbca04", "description": "Waiting for a provider quota to reset"}
+- {"name": "agent:failed", "color": "b60205", "description": "Run refused or failed; the reason is in a comment"}
