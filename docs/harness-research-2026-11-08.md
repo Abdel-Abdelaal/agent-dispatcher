@@ -14,13 +14,14 @@ raising the score. What's left worth taking is a few specific features, below.
 
 ## Project by project
 
-Licences and activity were read from GitHub on 2026-11-08.
+Licences were read from GitHub on 2026-11-08. Every project had commits in the
+last month except Agentless, last pushed in December 2024.
 
 | Project | Licence | What it offers | Where we stand | Verdict |
 | --- | --- | --- | --- | --- |
 | [OpenCode](https://github.com/anomalyco/opencode) | MIT | coding-agent runtime with file tools, any OpenAI-compatible model | our worker, reviewer and planner run on it (pinned 1.18.35) | adopted |
 | [SWE-agent](https://github.com/SWE-agent/SWE-agent), [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) | MIT | agent-computer interface, executable feedback | the sandbox `run` tool and the reproduce-first instruction come from this line of work | ideas adopted; no code needed |
-| [Agentless](https://github.com/OpenAutoCoder/Agentless) | MIT | localise, repair, validate; sample several patches and pick one with tests | untaken: patch sampling and selection | see "Best of N" |
+| [Agentless](https://github.com/OpenAutoCoder/Agentless) | MIT | localise, repair, validate; sample several patches and pick one with tests | untaken: patch sampling and selection | see item 2 under "What we take" |
 | [OpenHands](https://github.com/OpenHands/software-agent-sdk) | MIT | agent SDK, isolated workspaces, context condensing | we have our own Docker sandbox; rejected as a whole on 25 October | keep rejected; condensing noted below |
 | [Goose](https://github.com/aaif-goose/goose) | Apache-2.0 | general agent runtime with MCP extensions | overlaps OpenCode; nothing it adds would raise coding results | keep rejected |
 | [ProPR](https://github.com/integry/propr) | Apache-2.0 | label an issue, get a PR from an agent in its own container; `/review` and `/fix` comments on the PR push follow-up commits | same shape as this controller, in TypeScript; small project (about 30 stars) | take the PR-comment follow-up idea, not the code |
@@ -43,21 +44,21 @@ figures, self-reported and not checked by us.
 ## What we take, in order
 
 1. **Keep what a failed call said** (#95). Bench 7 lost a correct fix to two
-   review calls that failed with no reason, and nothing recorded why. Diagnosis
-   comes before any fix.
+    review calls that failed with no reason, and nothing recorded why. Diagnosis
+    comes before any fix.
 2. **Best of N on hard tasks, picked by our own checks.** The one lever the
-   research agrees on. A second worker attempt from the same plan would run only
-   at the hard level, and the controller would pick between candidates with the
-   sandbox checks and the task's reproduction test before the reviewer sees one.
-   It roughly doubles tokens on hard tasks (the most expensive tasks in the
-   current run used 300k to 510k each), so it needs Abdel's go-ahead before
-   it's built.
+    research agrees on. A second worker attempt from the same plan would run only
+    at the hard level, and the controller would pick between candidates with the
+    sandbox checks and the task's reproduction test before the reviewer sees one.
+    It roughly doubles tokens on hard tasks (the most expensive tasks in the
+    current benchmark used 300k to 510k each), so it needs Abdel's go-ahead before
+    it's built.
 3. **Follow-up commits from PR comments (from ProPR).** Today an agent's draft PR
-   waits for Abdel, and a review comment does nothing. An owner comment such as
-   `/fix <what>` on an agent PR would start a repair run on that branch under the
-   same gates. This changes the flow, not the benchmark score.
+    waits for Abdel, and a review comment does nothing. An owner comment such as
+    `/fix <what>` on an agent PR would start a repair run on that branch under the
+    same gates. This changes the flow, not the benchmark score.
 4. **Context condensing (from OpenHands), measured first.** Calls that hit their
-   turn cap are continued at a higher level today. If traces show continued calls
-   failing because they lost context, condensing is the next thing to try.
+    turn cap are continued at a higher level today. If traces show continued calls
+    failing because they lost context, condensing is the next thing to try.
 
 Nothing was installed and no upstream code was copied for this review.
