@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_dispatcher import cli
 from agent_dispatcher.awake import kept_awake
 from agent_dispatcher.dispatcher import choose_team
+from agent_dispatcher.execute import TOKEN_KINDS
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.publish import GitHubWriter
 from agent_dispatcher.sandbox import Sandbox, SandboxResult
@@ -187,10 +188,7 @@ def usage(directory: Path, run_id: int) -> dict[str, int]:
             if record.get("run_id") != run_id or not record.get("duration_ms"):
                 continue
             spent: dict[str, Any] = record.get("usage") or {}
-            totals["tokens"] += sum(
-                int(spent.get(key) or 0)
-                for key in ("input_tokens", "output_tokens", "reasoning_tokens")
-            )
+            totals["tokens"] += sum(int(spent.get(key) or 0) for key in TOKEN_KINDS)
             totals["model_seconds"] += int(record["duration_ms"]) // 1000
             totals["calls"] += 1
     return totals
