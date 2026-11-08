@@ -597,6 +597,11 @@ class Run:
             usage=result.usage,
             retention_errors=list(result.retention_errors),
             **self._output(result.text),
+            **(
+                self.telemetry.failure(result.detail)
+                if self.telemetry and result.exit_code != 0
+                else {}
+            ),
         )
 
     def _tuning(self, name: str) -> Tuning | None:

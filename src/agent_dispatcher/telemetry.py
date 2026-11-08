@@ -115,17 +115,36 @@ class Telemetry:
             "excerpt_truncated": truncated,
             "output_excerpt": None,
         }
+        excerpt, status = self._scanned(text[:EXCERPT_CHARS])
+        return described | {"excerpt_status": status, "output_excerpt": excerpt}
+
+    def failure(self, text: str) -> dict[str, object]:
+        """Describe what a harness said about a failed call, under the same rules.
+
+        Error text can quote a request or a key, so it's scanned like model
+        output. The end is kept, because that's where a harness reports why it
+        stopped.
+        """
+        excerpt, status = self._scanned(text[-EXCERPT_CHARS:])
+        return {
+            "error_chars": len(text),
+            "error_excerpt": excerpt,
+            "error_excerpt_status": status,
+        }
+
+    def _scanned(self, text: str) -> tuple[str | None, str]:
+        """Return the text cleared for keeping, or None, with the reason."""
         if not text:
-            return described | {"excerpt_status": "empty"}
+            return None, "empty"
         if self.scanner is None:
-            return described | {"excerpt_status": "omitted_no_scanner"}
-        excerpt, redacted = redact(text[:EXCERPT_CHARS], self.secrets)
+            return None, "omitted_no_scanner"
+        excerpt, redacted = redact(text, self.secrets)
         scanned = self.scanner(excerpt)
         if scanned is None:
-            return described | {"excerpt_status": "omitted_scanner_failed"}
+            return None, "omitted_scanner_failed"
         scanned, rescrubbed = redact(scanned, self.secrets)
         status = "redacted" if redacted or rescrubbed or scanned != excerpt else "clean"
-        return described | {"excerpt_status": status, "output_excerpt": scanned}
+        return scanned, status
 
     def record(self, **fields: object) -> dict[str, object]:
         """Write one bounded, redacted record and return it."""
