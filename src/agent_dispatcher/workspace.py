@@ -111,6 +111,13 @@ class Workspace:
             environment=env,
         )
 
+    def original(self, clone: Path, name: str) -> str:
+        """Return `name` as the clone's base commit has it, read through trusted Git."""
+        prefix, env = self._trusted_context(clone)
+        return self._git(
+            self._root, *prefix, "cat-file", "blob", f"HEAD:{name}", environment=env
+        )
+
     def drop_emptied(self, clone: Path) -> list[str]:
         """Delete the files this change added and then emptied; return their paths.
 

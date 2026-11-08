@@ -27,13 +27,21 @@ writes ever runs on the controller's host, because that host holds credentials.
     environment has). If they fail, the worker gets the output and one round to
     fix the cause. The reviewer sees the final result, and is told to reject
     changes that weaken tests or tool settings.
-5. **Choosing between candidates on hard tasks.** With
+5. **Original tests.** A worker can hide a behaviour change by rewriting the
+    assertion that checked it, and the checks then pass. So when a change edits
+    existing test files, the controller reads their base versions through its
+    own Git metadata and runs them against the changed code, copied into the
+    sandbox only. The reviewer gets the tests that fail and is told to reject
+    unless the task asks for that behaviour to change. Nothing runs when the
+    checks already failed before the change.
+6. **Choosing between candidates on hard tasks.** With
     `DISPATCHER_HARD_CANDIDATES=2` (the default), a hard task gets a second
     worker change from the same plan in a fresh clone, checked the same way.
     Then each candidate's new or edited test files run against the other
     candidate's code, copied into the sandbox only. The controller keeps, in
     order, the one that changed something, fits the gate's limits, passes the
-    checks, passes more of the other's tests, finished, and is smaller; a tie
+    checks, breaks fewer original tests (step 5), passes more of the other's
+    tests, finished, and is smaller; a tie
     keeps the first. Only the kept candidate goes to the gate and the reviewer.
     The second candidate starts when a 30-minute coding call, the review and a
     repair still fit before the run's deadline; its calls end 25 minutes early,
