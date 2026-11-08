@@ -110,6 +110,11 @@ providers of their role. See [extra providers](docs/extra-providers.md).
 - `DISPATCHER_SKIP_PLAN_FOR_EASY_DOCS=true` is an experiment, off by default. It sends
   easy documentation tasks straight to the worker, and the review still checks them.
   Compare telemetry before keeping it on.
+- Spending more where it pays: `DISPATCHER_HARD_CANDIDATES=2` (the default) gives a
+  hard task a second worker change from the same plan when the sandbox can check
+  both, and the controller keeps the one its checks and the other's tests favour
+  ([how](docs/sandbox.md#how-it-works)). It costs about one more hard coding call per
+  hard task; set it to 1 to turn it off.
 
 ### Which repositories
 

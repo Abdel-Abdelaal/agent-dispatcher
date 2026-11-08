@@ -92,6 +92,19 @@ TIDY_START = "agent-tidy-diff-start"
 TIDY_END = "agent-tidy-diff-end"
 
 
+def pytest_command(files: list[str]) -> str:
+    """Run only the named test files with the repository's own pytest.
+
+    Exit 0 means they all passed, 1 that some failed and 2 that they could not
+    be collected (an import error, say). A repository without pytest exits 99.
+    """
+    names = " ".join(shlex.quote(name) for name in files)
+    return (
+        "if [ -x /opt/venv/bin/pytest ]; then "
+        f"pytest -q -p no:cacheprovider -- {names}; else exit 99; fi"
+    )
+
+
 def tidy_command(files: list[str]) -> str:
     """Format `files` and apply ruff's safe fixes, then print the diff they made.
 
@@ -520,13 +533,20 @@ class Sandbox:
         self._prune()
         return key
 
-    def run(self, image: str, worktree: Path, command: str) -> SandboxResult:
+    def run(
+        self,
+        image: str,
+        worktree: Path,
+        command: str,
+        files: dict[str, str] | None = None,
+    ) -> SandboxResult:
         """Run `command` in a fresh locked-down container over a copy of `worktree`.
 
-        Raises SandboxError when the sandbox itself failed, so that is never
-        mistaken for the command failing.
+        `files` are written into the copy over the worktree's own (the worktree
+        itself is never changed). Raises SandboxError when the sandbox itself
+        failed, so that is never mistaken for the command failing.
         """
-        stream = archive(worktree, {COMMAND_FILE: command + "\n"})
+        stream = archive(worktree, {**(files or {}), COMMAND_FILE: command + "\n"})
         # The copy has no .git, so some tests' git calls would fail: give them a
         # one-commit repository of the copied files, with no history or remote.
         # Output goes to the tmpfs, which bounds it, and only its end comes back.

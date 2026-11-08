@@ -44,6 +44,7 @@ from agent_dispatcher.sandbox import (
     SandboxError,
     SandboxResult,
     environment_key,
+    pytest_command,
     tidy_command,
 )
 from agent_dispatcher.states import State
@@ -216,6 +217,16 @@ WORK_SECONDS = {"easy": 20 * 60, "medium": 30 * 60, "hard": 40 * 60}
 DEADLINE_RESERVE = timedelta(minutes=15)
 # A call given less time than this can't finish useful work, so the run stops.
 MIN_CALL_SECONDS = 4 * 60
+# A hard task's extra candidates start only with this much of the run left after
+# a full hard coding call, so the review and one repair still fit after them.
+CANDIDATE_RESERVE = timedelta(minutes=25)
+# Test files a candidate added or changed; the other candidates run them.
+_TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
+# Larger test files are left out of the cross-check rather than copied.
+_TEST_FILE_BYTES = 200_000
+# What a cross-check's exit code says: 0 passed, 1 failed, 2 not collected (an
+# import error); anything else (timeout, no pytest) says nothing.
+_CROSS_FAILED = {1, 2}
 # Coding calls whose time-limited edits may still go to the gate and review. CI
 # repairs are left out: they push to an open PR, so they keep failing closed.
 _CODING = {"implement", "repair"}
@@ -541,6 +552,36 @@ def changed_files(clone: Path, patch: str) -> str:
     return "".join(block + "\n" for block in blocks)
 
 
+@dataclass(frozen=True)
+class Candidate:
+    """One worker change from the plan, with what the run knew about it."""
+
+    clone: Path
+    checks: SandboxResult | None
+    unfinished: bool
+    shrunk: bool
+
+
+def changed_tests(clone: Path, patch: str) -> dict[str, str]:
+    """Return the test files a change added or edited, as name to text.
+
+    Only plain names of regular files inside the clone, within a size limit,
+    so nothing outside it is read and nothing odd is copied.
+    """
+    found: dict[str, str] = {}
+    for name in dict.fromkeys(_NEW_FILE.findall(patch)):
+        if not (
+            _TEST_FILE.search(name)
+            and _PLAIN_NAME.fullmatch(name)
+            and _regular_file(clone, name)
+        ):
+            continue
+        data = (clone / name).read_bytes()
+        if len(data) <= _TEST_FILE_BYTES:
+            found[name] = data.decode("utf-8", errors="replace")
+    return found
+
+
 def step_budget(turns: int) -> str:
     """Tell a call its step cap: at the cap it loses its tools mid-task."""
     if turns <= 1:
@@ -581,6 +622,11 @@ class Run:
     # When the run must be over (the cycle's own limit, less a margin); None means
     # each call only has its own limit.
     deadline: datetime | None = None
+    # Independent worker changes made from the plan on a hard task when the
+    # sandbox can check them; the controller keeps one. 1 means no extra.
+    hard_candidates: int = 1
+    # How many candidates this run made, for the PR summary.
+    candidates: int = field(default=1, init=False)
     unfinished: bool = field(default=False, init=False)
     # Why the last model call stopped, as its adapter said ("" when it didn't).
     last_stop: str = field(default="", init=False)
@@ -1470,15 +1516,169 @@ class Run:
             )
             self._record("gate", "controller", outcome="tidied", files=changed)
 
+    def _candidate(self, clone: Path, plan: str) -> None:
+        """Have the worker make a change from the plan in `clone`, then check it."""
+        self._implement(clone, plan)
+        self._verify(clone, plan)
+        self._fit(clone, plan)
+
+    def _snapshot(self, clone: Path) -> Candidate:
+        return Candidate(clone, self.checks, self.unfinished, self.shrunk)
+
+    def _restore(self, candidate: Candidate) -> None:
+        self.checks = candidate.checks
+        self.unfinished = candidate.unfinished
+        self.shrunk = candidate.shrunk
+
+    def _time_for_candidate(self) -> bool:
+        """Say whether a full hard coding call, the review and a repair still fit."""
+        if self.deadline is None:
+            return True
+        left = self.deadline - DEADLINE_RESERVE - datetime.now(UTC)
+        call = timedelta(seconds=WORK_SECONDS[Level.HARD.label])
+        return left >= call + CANDIDATE_RESERVE
+
+    def _best_candidate(self, first: Path, plan: str) -> Path:
+        """On a hard task, make more candidates from the plan and keep the best.
+
+        Sampling several changes and choosing with tests is the documented gain
+        for a fixed model (Agentless, SWE-Replay; see docs/prior-art.md). The
+        choosing is the weak part, so this runs only when the sandbox can check
+        every candidate, and the controller chooses, never a model. A candidate
+        that stops (its time, a failed call) is left out; a spent quota or a
+        revoked task still stops the run.
+        """
+        if (
+            self.hard_candidates < 2  # noqa: PLR2004 - one candidate is no choice
+            or self.level is not Level.HARD
+            or self.sandbox is None
+            or self.sandbox_image is None
+            or environment_key(first) is None
+        ):
+            return first
+        pool = [self._snapshot(first)]
+        url = self.remote.format(repo=self.issue.repo)
+        for number in range(2, self.hard_candidates + 1):
+            if not self._time_for_candidate():
+                self.notes.append(
+                    f"Too little of the run's time is left for candidate {number}."
+                )
+                break
+            self.notes.append(
+                f"The task is hard, so {self.team.worker} makes candidate {number} "
+                "from the same plan in a fresh clone."
+            )
+            clone = self.workspace.clone(url, f"run-{self.run_id}-agent-{number}")
+            self.checks, self.unfinished, self.shrunk = None, False, False
+            try:
+                self._candidate(clone, plan)
+            except Stop as stop:
+                if self._authority_denied or stop.outcome.state is State.PARKED:
+                    raise
+                reason = (stop.outcome.detail.splitlines() or ["no reason"])[0]
+                self.notes.append(
+                    f"Candidate {number} stopped and is left out: {reason}"
+                )
+                break
+            pool.append(self._snapshot(clone))
+        self.candidates = len(pool)
+        chosen = self._choose(pool)
+        self._restore(chosen)
+        return chosen.clone
+
+    def _choose(self, pool: list[Candidate]) -> Candidate:
+        """Keep the candidate the controller's own evidence favours.
+
+        In order: it changed something, it fits the gate's limits, the checks
+        pass, it passes the tests the other candidates wrote (the
+        reproduction-test selection of Agentless and CodeMonkeys), it finished,
+        and it is smaller. A tie keeps the earlier candidate.
+        """
+        if len(pool) == 1:
+            return pool[0]
+        patches = [self.workspace.patch(candidate.clone) for candidate in pool]
+        tests = [
+            changed_tests(candidate.clone, patch)
+            for candidate, patch in zip(pool, patches, strict=True)
+        ]
+        scores: list[tuple[bool, bool, bool, int, bool, int]] = []
+        rows: list[dict[str, object]] = []
+        for index, (candidate, patch) in enumerate(zip(pool, patches, strict=True)):
+            files, lines = patch_size(patch)
+            cross = [
+                self._cross_check(candidate, other)
+                for at, other in enumerate(tests)
+                if at != index and other
+            ]
+            passed = candidate.checks is not None and candidate.checks.exit_code == 0
+            fits = files <= self.limits.max_files and lines <= self.limits.max_lines
+            scores.append(
+                (
+                    bool(patch.strip()),
+                    fits,
+                    passed,
+                    sum(cross),
+                    not candidate.unfinished,
+                    -lines,
+                )
+            )
+            rows.append(
+                {
+                    "candidate": index + 1,
+                    "lines": lines,
+                    "fits": fits,
+                    "checks_passed": passed,
+                    "others_tests_passed": cross.count(1),
+                    "others_tests_failed": cross.count(-1),
+                    "unfinished": candidate.unfinished,
+                }
+            )
+        best = max(range(len(pool)), key=lambda at: (scores[at], -at))
+        described = "; ".join(
+            f"candidate {row['candidate']}: {row['lines']} lines, checks "
+            f"{'passed' if row['checks_passed'] else 'not passed'}, other "
+            f"candidates' tests {row['others_tests_passed']} passed and "
+            f"{row['others_tests_failed']} failed"
+            for row in rows
+        )
+        self.notes.append(f"The controller kept candidate {best + 1} ({described}).")
+        self._record(
+            "gate",
+            "controller",
+            outcome="candidate_chosen",
+            chosen=best + 1,
+            candidates=rows,
+        )
+        return pool[best]
+
+    def _cross_check(self, candidate: Candidate, tests: dict[str, str]) -> int:
+        """Run another candidate's tests on this one: 1 passed, -1 failed, 0 unknown.
+
+        The files go into the sandbox's copy only; the clone stays as it is.
+        """
+        if self.sandbox is None or self.sandbox_image is None:
+            return 0
+        try:
+            result = self.sandbox.run(
+                self.sandbox_image,
+                candidate.clone,
+                pytest_command(sorted(tests)),
+                tests,
+            )
+        except (SandboxError, OSError):
+            return 0
+        if result.exit_code == 0:
+            return 1
+        return -1 if result.exit_code in _CROSS_FAILED else 0
+
     def _work(self) -> Outcome:
         self._screen()
         url = self.remote.format(repo=self.issue.repo)
         agent_clone = self.workspace.clone(url, f"run-{self.run_id}-agent")
         self._prepare_sandbox(agent_clone)
         plan = self._plan(agent_clone)
-        self._implement(agent_clone, plan)
-        self._verify(agent_clone, plan)
-        self._fit(agent_clone, plan)
+        self._candidate(agent_clone, plan)
+        agent_clone = self._best_candidate(agent_clone, plan)
         findings = ""
         for attempt in range(1, MAX_REVIEWS + 1):
             clone, patch = self._gate(agent_clone, attempt)
@@ -1569,6 +1769,8 @@ class Run:
             ("Model time", f"{minutes} min" if minutes else "under a minute"),
             ("Repository checks", checks),
         )
+        if self.candidates > 1:
+            rows += (("Candidate changes", f"{self.candidates}, one kept"),)
         lines = "\n".join(f"| {name} | {value} |" for name, value in rows)
         return f"| Run | |\n| --- | --- |\n{lines}"
 

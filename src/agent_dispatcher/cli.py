@@ -276,6 +276,7 @@ def make_run(  # noqa: PLR0913 - a run is assembled from every part of the host
         triage=triage(settings, client),
         ladder=settings.thinking_ladder,
         skip_easy_docs_plan=settings.skip_plan_for_easy_docs,
+        hard_candidates=settings.hard_candidates,
         telemetry=telemetry(settings),
         triage_model=triage_model(settings),
         sandbox=sandbox(settings),
