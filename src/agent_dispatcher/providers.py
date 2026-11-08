@@ -59,6 +59,13 @@ class RunResult:
     # failed call, "output_limit" for one whose last reply was cut off.
     stop_reason: str = ""
     retention_errors: tuple[str, ...] = ()
+    # What the harness said about a failure (its stderr or error events), at most
+    # DETAIL_CHARS from the end. Untrusted; telemetry keeps it only once scanned.
+    detail: str = ""
+
+
+# Enough of a failing harness's last words to say why, without holding a whole log.
+DETAIL_CHARS = 4000
 
 
 class TermsError(RuntimeError):
@@ -278,6 +285,7 @@ def provider_result(  # noqa: PLR0913 - every field of a result comes from the r
         effort=tuning.effort or None if tuning else None,
         usage=usage,
         stop_reason="timed_out" if timed_out else "",
+        detail=error.strip()[-DETAIL_CHARS:] if failed else "",
     )
 
 

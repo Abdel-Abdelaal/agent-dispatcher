@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from agent_dispatcher import native_evidence
 from agent_dispatcher.providers import (
+    DETAIL_CHARS,
     MIMO_MODEL,
     MIMO_OPENAI,
     OpenCodeCli,
@@ -64,6 +65,18 @@ def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
                     name = key + "_tokens"
                     usage[name] = usage.get(name, 0) + count
     return text, usage or None, failed
+
+
+def failure_detail(output: str, stderr: str) -> str:
+    """Say what OpenCode reported about a failure: its stderr and its error events.
+
+    The event stream's tail is usually tool output, not the reason, so only the
+    error events are taken from it.
+    """
+    errors = [
+        json.dumps(data) for data in records(output) if data.get("type") == "error"
+    ]
+    return "\n".join([stderr.strip(), *errors]).strip()[-DETAIL_CHARS:]
 
 
 def steps_taken(output: str) -> int:
@@ -443,6 +456,8 @@ class OpenCodeWorker:
             tuning=Tuning(self.model, ""),
             usage=usage,
         )
+        if result.exit_code != 0:
+            result = replace(result, detail=failure_detail(stdout, stderr))
         if result.exit_code == 0 and steps_taken(stdout) >= cap:
             # OpenCode exits normally at its cap, after making the model summarise
             # without tools. Say so, as Claude Code does, so the controller can

@@ -720,7 +720,9 @@ class FailsOnceModel(FakeModel):
     ) -> RunResult:
         if not self.prompts:
             self.prompts.append((prompt, read_only))
-            return RunResult(self.name, 1, "", exhausted=False)
+            return RunResult(
+                self.name, 1, "", exhausted=False, detail="upstream returned 502"
+            )
         return super().run(
             prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
         )
@@ -732,7 +734,7 @@ def test_a_call_that_failed_without_a_reason_is_tried_once_more(
     planner, worker, _ = models([{"docs/api.md": "# API\n"}], [])
     reviewer = FailsOnceModel("codex", [APPROVE])
     run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
-    run.telemetry = Telemetry(tmp_path / "telemetry")
+    run.telemetry = Telemetry(tmp_path / "telemetry", scanner=lambda text: text)
     outcome = run.execute()
     assert outcome == Outcome(State.REVIEW, "https://github.com/o/r/pull/9")
     assert len(reviewer.prompts) == 2
@@ -744,8 +746,11 @@ def test_a_call_that_failed_without_a_reason_is_tried_once_more(
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    reviews = [r["outcome"] for r in records if r["stage"] == "review"]
-    assert reviews == ["failed", "approved"]
+    reviews = [r for r in records if r["stage"] == "review"]
+    assert [r["outcome"] for r in reviews] == ["failed", "approved"]
+    assert reviews[0]["error_excerpt"] == "upstream returned 502"
+    assert reviews[0]["error_excerpt_status"] == "clean"
+    assert "error_excerpt" not in reviews[1]
 
 
 @pytest.mark.parametrize("stop_reason", ["", "timed_out"])
