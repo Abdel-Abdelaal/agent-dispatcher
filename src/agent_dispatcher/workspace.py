@@ -15,6 +15,11 @@ from pathlib import Path
 from agent_dispatcher.gate import FileChange, parse_numstat
 from agent_dispatcher.providers import Runner, scrubbed_env
 
+# Empty files a change may add on purpose; drop_emptied keeps them.
+KEEP_EMPTY = frozenset({"__init__.py", "py.typed", ".gitkeep", ".keep"})
+# A file this size or smaller that is only whitespace counts as emptied.
+EMPTY_BYTES = 64
+
 _SYMLINK_MODE = "mode 120000"
 
 
@@ -106,6 +111,44 @@ class Workspace:
             environment=env,
         )
 
+    def drop_emptied(self, clone: Path) -> list[str]:
+        """Delete the files this change added and then emptied; return their paths.
+
+        The worker has no delete tool, so overwriting a file it created with
+        nothing is how it removes a scratch file. Empty files a change may add
+        on purpose (`__init__.py`, `py.typed`, `.gitkeep`) stay, and so does
+        every file the base already had.
+        """
+        prefix, env = self._trusted_context(clone)
+        self._git(self._root, *prefix, "add", "--all", environment=env)
+        added = self._git(
+            self._root,
+            *prefix,
+            "diff",
+            "--cached",
+            "--name-only",
+            "--diff-filter=A",
+            "--no-renames",
+            "-z",
+            environment=env,
+        )
+        root = clone.resolve()
+        dropped: list[str] = []
+        for name in filter(None, added.split("\0")):
+            path = root / name
+            if (
+                path.name in KEEP_EMPTY
+                or path.is_symlink()
+                or not path.is_file()
+                or not path.resolve().is_relative_to(root)
+                or path.stat().st_size > EMPTY_BYTES
+                or path.read_bytes().strip()
+            ):
+                continue
+            path.unlink()
+            dropped.append(name)
+        return dropped
+
     def base(self, clone: Path) -> str:
         """Read the original base from controller-owned metadata, never agent HEAD."""
         prefix, env = self._trusted_context(clone)
@@ -140,6 +183,28 @@ class Workspace:
             if _SYMLINK_MODE in line
         ]
         return parse_numstat(numstat), symlinks
+
+    def apply_in_place(self, clone: Path, patch: str, files: list[str]) -> list[str]:
+        """Apply a controller-made patch to the agent's clone; return what changed.
+
+        Only to `files`' working copies, through controller-owned metadata, never
+        the agent's own Git, and never its index. A path outside `files` is left
+        alone even if the patch names it.
+        """
+        prefix, env = self._trusted_context(clone)
+        before = {name: (clone / name).read_bytes() for name in files}
+        includes = [f"--include={name}" for name in files]
+        self._git(
+            clone,
+            *prefix,
+            "apply",
+            "--whitespace=nowarn",
+            *includes,
+            "-",
+            stdin=patch,
+            environment=env,
+        )
+        return [name for name in files if (clone / name).read_bytes() != before[name]]
 
     def push(self, clone: Path, branch: str, message: str) -> None:
         """Commit the applied patch on a new branch and push it."""

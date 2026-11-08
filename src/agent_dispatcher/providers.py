@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -54,17 +55,32 @@ class RunResult:
     model: str | None = None
     effort: str | None = None
     usage: dict[str, int | float] | None = None
-    # Why a failed call stopped, when the harness says: "max_turns" or "timed_out".
+    # Why a call stopped, when the harness says: "max_turns" or "timed_out" for a
+    # failed call, "output_limit" for one whose last reply was cut off.
     stop_reason: str = ""
     retention_errors: tuple[str, ...] = ()
+    # What the harness said about a failure (its stderr or error events), at most
+    # DETAIL_CHARS from the end. Untrusted; telemetry keeps it only once scanned.
+    detail: str = ""
+
+
+# Enough of a failing harness's last words to say why, without holding a whole log.
+DETAIL_CHARS = 4000
 
 
 class TermsError(RuntimeError):
     """The run would break the provider's terms for subscription automation."""
 
 
-# One model call never runs longer than this; a stuck worker can't hold the queue.
+# One model call never runs longer than this unless the controller says otherwise;
+# a stuck worker can't hold the queue.
 STEP_TIMEOUT_SECONDS = 20 * 60
+# The limit for the model call running now. The controller sets it around each
+# call (longer for harder coding, never past the run's deadline), and every CLI
+# adapter's default runner reads it, so no adapter needs its own parameter.
+CALL_TIMEOUT: ContextVar[float] = ContextVar(
+    "call_timeout", default=STEP_TIMEOUT_SECONDS
+)
 TIMED_OUT = 124
 
 
@@ -85,13 +101,16 @@ def subprocess_runner(
     cwd: Path,
     stdin: str,
     env: Mapping[str, str],
-    timeout: float = STEP_TIMEOUT_SECONDS,
+    timeout: float | None = None,
 ) -> tuple[int, str, str]:
     """Run a CLI with the prompt on stdin, so it never shows up in a process list.
 
     The program is resolved on PATH first, so Windows npm shims (`claude.cmd`) run.
     On timeout the whole process tree is killed and exit code 124 is returned.
+    Without a `timeout`, the current call's limit (`CALL_TIMEOUT`) applies.
     """
+    if timeout is None:
+        timeout = CALL_TIMEOUT.get()
     program = shutil.which(argv[0]) or argv[0]
     # Bytes, not text mode: on Windows text mode rewrites line endings, which
     # breaks patches piped to `git apply`.
@@ -266,6 +285,7 @@ def provider_result(  # noqa: PLR0913 - every field of a result comes from the r
         effort=tuning.effort or None if tuning else None,
         usage=usage,
         stop_reason="timed_out" if timed_out else "",
+        detail=error.strip()[-DETAIL_CHARS:] if failed else "",
     )
 
 

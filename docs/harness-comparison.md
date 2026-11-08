@@ -19,7 +19,26 @@ remain unchanged. The alternative gets file tools only, no shell, outside-direct
 access, web, subagents or MCP. Project/user configuration is excluded. Agent
 steps use the existing per-level turn budget. OpenCode's native steps limit asks
 for a final text response; it does not establish that code is correct or complete.
-The shared20-minute process-tree timeout remains.
+Every call runs under a process-tree timeout: 20 minutes for read-only calls, and
+20, 30 or 40 minutes for coding calls at easy, medium or hard, never past the run's
+deadline (the cycle limit, less a margin and a 15-minute reserve for checks and
+publishing). OpenCode exits normally when a reply hits the output limit, so the
+adapter reports a last step that stopped for `length` as `output_limit`. A first
+coding call that changed no file, cut off or not, gets one more call that says so
+and asks for the edits; a repair that changes nothing is not repeated. Edits made
+before a reply was cut off go to the gate and the reviewer as possibly unfinished,
+as they do after a timeout or after the turn cap at hard, where there is no higher
+level to continue at. The worker has no delete tool, so it removes a scratch file
+it wrote by emptying it: after every coding call the controller deletes the new
+files left empty, except `__init__.py`, `py.typed` and `.gitkeep`. Every coding
+call is told the diff caps. When a change is over them after the checks, the
+worker gets one call to shrink it, and the checks run again; the gate's caps are
+unchanged and it still refuses what stays too big. A call that fails without a
+reason (no time, turn or output limit, no spent quota, no lost evidence) is tried
+once more, since a provider or transport error would otherwise end the run. A planner that reaches its step cap is made to
+summarise without tools, so its reply is often notes on what it read; it gets one
+tool-free turn to turn those notes into numbered steps, and keeps the notes if that
+reply is unusable.
 
 The pinned version's home-directory override also excludes user `.opencode`
 agents/plugins, which project-config disabling alone does not exclude. This

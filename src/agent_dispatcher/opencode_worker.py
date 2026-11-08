@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from agent_dispatcher import native_evidence
 from agent_dispatcher.providers import (
+    DETAIL_CHARS,
     MIMO_MODEL,
     MIMO_OPENAI,
     OpenCodeCli,
@@ -30,19 +31,23 @@ from agent_dispatcher.providers import (
 from agent_dispatcher.workspace import GitError
 
 
-def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
-    """Keep the last text reply and sum only explicit non-negative token counts."""
-    text = ""
-    usage: dict[str, int | float] = {}
-    failed = False
+def records(output: str) -> Iterator[dict[str, Any]]:
+    """Yield each JSON object in OpenCode's event stream, skipping anything else."""
     for line in output.splitlines():
         try:
             value: Any = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(value, dict):
-            continue
-        data = cast("dict[str, Any]", value)
+        if isinstance(value, dict):
+            yield cast("dict[str, Any]", value)
+
+
+def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
+    """Keep the last text reply and sum only explicit non-negative token counts."""
+    text = ""
+    usage: dict[str, int | float] = {}
+    failed = False
+    for data in records(output):
         part = data.get("part", {})
         if data.get("type") == "error":
             failed = True
@@ -62,18 +67,53 @@ def events(output: str) -> tuple[str, dict[str, int | float] | None, bool]:
     return text, usage or None, failed
 
 
+def failure_detail(output: str, stderr: str) -> str:
+    """Say what OpenCode reported about a failure: its stderr and its error events.
+
+    The event stream's tail is usually tool output, not the reason, so only the
+    error events are taken from it.
+    """
+    errors = [
+        json.dumps(data) for data in records(output) if data.get("type") == "error"
+    ]
+    return "\n".join([stderr.strip(), *errors]).strip()[-DETAIL_CHARS:]
+
+
 def steps_taken(output: str) -> int:
     """Count the model steps OpenCode finished, from its JSON event stream."""
-    count = 0
-    for line in output.splitlines():
-        try:
-            value: Any = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            data = cast("dict[str, Any]", value)
-            count += data.get("type") == "step_finish"
-    return count
+    return sum(data.get("type") == "step_finish" for data in records(output))
+
+
+def finish_reason(output: str) -> str:
+    """Return why the last model step ended ("stop", "tool-calls", "length"...).
+
+    OpenCode ends the run when a step stops for any reason but tool calls, so
+    the last step's reason is why the run ended. Empty when no step said.
+    "length" is OpenCode's word for a reply cut off at the output limit.
+    """
+    reason = ""
+    for data in records(output):
+        part = data.get("part")
+        if data.get("type") == "step_finish" and isinstance(part, dict):
+            found = cast("dict[str, Any]", part).get("reason")
+            reason = found if isinstance(found, str) else ""
+    return reason
+
+
+# A one-turn call's internal cap: above one so no last-step summary prompt.
+ANSWER_STEPS = 2
+# Variables the run tool's server keeps from the controller: none are secrets.
+# Windows' own ssh.exe exits 255, silently, without PROGRAMDATA (where its
+# system config lives), and the worker's scrubbed environment drops it.
+_SERVER_ENV = (
+    "SYSTEMROOT",
+    "PROGRAMDATA",
+    "USERPROFILE",
+    "HOME",
+    "TEMP",
+    "TMP",
+    "PATHEXT",
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +124,7 @@ class SandboxCall:
     host: str | None = None
     ssh_key: Path | None = None
     log: Path | None = None
+    client: str | None = None
 
     def server(self, worktree: Path) -> dict[str, object]:
         """Return OpenCode's config for the call's local sandbox MCP server."""
@@ -92,6 +133,8 @@ class SandboxCall:
             args += ["--host", self.host]
         if self.ssh_key is not None:
             args += ["--key", str(self.ssh_key)]
+        if self.client is not None:
+            args += ["--client", self.client]
         if self.log is not None:
             args += ["--log", str(self.log)]
         return {
@@ -107,7 +150,14 @@ class SandboxCall:
                 "agent_dispatcher.sandbox_mcp",
                 *args,
             ],
+            # OpenCode starts the server with only these variables: Windows
+            # sockets need SYSTEMROOT, and ssh its profile folder.
             "environment": {
+                **{
+                    name: os.environ[name]
+                    for name in _SERVER_ENV
+                    if os.environ.get(name)
+                },
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
                 "PYTHONSAFEPATH": "1",
             },
@@ -166,13 +216,58 @@ class OpenCodeWorker:
             errors.append("receipt_storage_error")
         return tuple(errors)
 
+    def _instruction(self, *, read_only: bool, tools: bool) -> str:
+        """The command-line message: what this call may do with its tools.
+
+        A read-only planner or reviewer told to edit and fix spends its steps
+        trying, so it gets its own wording.
+        """
+        if not tools:
+            return (
+                "Do the task in the attached file. You have no tools: answer from "
+                "the attached text alone, in the requested format."
+            )
+        if read_only:
+            return (
+                "Do the task in the attached file. Edit nothing. "
+                + (
+                    "Use the sandbox run tool only to settle a specific doubt that "
+                    "reading the code doesn't. "
+                    if self.sandbox is not None
+                    else "Use only the read tools; do not attempt shell commands. "
+                )
+                + "Finish with the requested answer."
+            )
+        return (
+            "Do the task in the attached file. "
+            + (
+                "Edit with the file tools. When the task reports wrong behaviour "
+                "that no test shows yet, first add a test that reproduces it and "
+                "run it with the sandbox run tool to see it fail, then fix the "
+                "code; that test stays as part of the change. Run the project's "
+                "tests, linter and type checker with the sandbox run tool, the "
+                "only shell you have, and fix what fails "
+                "before you finish. "
+                if self.sandbox is not None
+                else "Use only available file tools. "
+                "CI runs tests; do not attempt shell commands. "
+            )
+            + "Finish with the requested answer once the file work is complete."
+        )
+
     def config(
-        self, *, read_only: bool, steps: int, worktree: Path | None = None
+        self,
+        *,
+        read_only: bool,
+        steps: int,
+        worktree: Path | None = None,
+        tools: bool = True,
     ) -> str:
         """Deny ambient tools and project configuration; no shell or outside reads.
 
         With a sandbox, the one extra tool runs commands in its container, never
-        on this host.
+        on this host. Without tools every permission is denied, and OpenCode
+        leaves denied tools out of the request.
         """
         config = cast(
             "dict[str, Any]",
@@ -207,7 +302,9 @@ class OpenCodeWorker:
             formatter=False,
             compaction={"auto": True, "prune": True},
         )
-        if self.sandbox is not None and worktree is not None:
+        if not tools:
+            config["permission"] = {"*": "deny"}
+        elif self.sandbox is not None and worktree is not None:
             config["mcp"] = {"sandbox": self.sandbox.server(worktree)}
             config["permission"]["sandbox_run"] = "allow"
         model = config["provider"]["worker"]["models"][self.model]
@@ -281,7 +378,17 @@ class OpenCodeWorker:
         environ: Mapping[str, str] | None,
         fork: tuple[Path, str] | None = None,
     ) -> RunResult:
-        config = self.config(read_only=read_only, steps=steps, worktree=worktree)
+        # One turn means answer now: no tools, so there's nothing to cut off. The
+        # cap stays above one because OpenCode prefills a "summarise your work"
+        # message at its last step, which would replace the requested answer.
+        tools = steps > 1
+        cap = steps if tools else ANSWER_STEPS
+        config = self.config(
+            read_only=read_only,
+            steps=cap,
+            worktree=worktree if tools else None,
+            tools=tools,
+        )
         retention_errors: tuple[str, ...] = ()
         with tempfile.TemporaryDirectory(prefix=f"{self.name}-opencode-") as tmp:
             root = Path(tmp)
@@ -333,16 +440,7 @@ class OpenCodeWorker:
                 "--file",
                 str(task),
                 "--",
-                "Do the task in the attached file. "
-                + (
-                    "Edit with the file tools. Run the project's tests, linter and "
-                    "type checker with the sandbox run tool, the only shell you "
-                    "have, and fix what fails before you finish. "
-                    if self.sandbox is not None
-                    else "Use only available file tools. "
-                    "CI runs tests; do not attempt shell commands. "
-                )
-                + "Finish with the requested answer once the file work is complete.",
+                self._instruction(read_only=read_only, tools=tools),
             ]
             code, stdout, stderr = runner(argv, worktree, "", env)
             if fork is not None or self.checkpoint_root is not None:
@@ -358,11 +456,18 @@ class OpenCodeWorker:
             tuning=Tuning(self.model, ""),
             usage=usage,
         )
-        if result.exit_code == 0 and steps_taken(stdout) >= steps:
+        if result.exit_code != 0:
+            result = replace(result, detail=failure_detail(stdout, stderr))
+        if result.exit_code == 0 and steps_taken(stdout) >= cap:
             # OpenCode exits normally at its cap, after making the model summarise
             # without tools. Say so, as Claude Code does, so the controller can
             # continue a worker and knows a final reply may be incomplete.
             result = replace(result, exit_code=1, stop_reason="max_turns")
+        elif result.exit_code == 0 and finish_reason(stdout) == "length":
+            # The reply hit the output limit, often still reasoning, and OpenCode
+            # ends there as if the model had finished. The run still counts as
+            # finished; the controller decides what an empty result is worth.
+            result = replace(result, stop_reason="output_limit")
         return (
             replace(
                 result,

@@ -63,26 +63,32 @@ class Server:
         started = time.monotonic()
         try:
             result = self.sandbox.run(self.image, self.worktree, command)
-        except (SandboxError, OSError):
-            # Never echo ssh or docker errors: they name hosts and key paths.
+        except (SandboxError, OSError) as error:
+            # The reason goes to the local log only. Never echo ssh or docker
+            # errors to the model: they name hosts and key paths.
+            self._log(
+                outcome="unavailable",
+                error=type(error).__name__,
+                reason=(str(error).splitlines() or [""])[0][:300],
+                detail=getattr(error, "detail", ""),
+                seconds=round(time.monotonic() - started, 1),
+            )
             return _text(
                 "The sandbox is unavailable right now; carry on without it.",
                 error=True,
             )
+        self._log(
+            exit_code=result.exit_code,
+            timed_out=result.timed_out,
+            seconds=round(time.monotonic() - started, 1),
+            command_chars=len(command),
+        )
+        return _text(result.report())
+
+    def _log(self, **fields: object) -> None:
         if self.log is not None:
             with self.log.open("a", encoding="utf-8") as file:
-                file.write(
-                    json.dumps(
-                        {
-                            "exit_code": result.exit_code,
-                            "timed_out": result.timed_out,
-                            "seconds": round(time.monotonic() - started, 1),
-                            "command_chars": len(command),
-                        }
-                    )
-                    + "\n"
-                )
-        return _text(result.report())
+                file.write(json.dumps(fields) + "\n")
 
     def reply(self, message: dict[str, Any]) -> dict[str, object] | None:
         """Implement the MCP lifecycle, discovery and the one tool."""
@@ -149,11 +155,16 @@ def serve(server: Server, source: TextIO, destination: TextIO) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Serve one call: `--image`, `--worktree`, optional `--host`, `--key`, `--log`."""
+    """Serve one call: `--image`, `--worktree` and optional connection arguments.
+
+    Those are `--host`, `--key`, `--client` (the full path of ssh or docker) and
+    `--log`.
+    """
     args = dict(zip(*[iter(sys.argv[1:] if argv is None else argv)] * 2, strict=True))
     sandbox = Sandbox(
         host=args.get("--host"),
         ssh_key=Path(args["--key"]) if "--key" in args else None,
+        client=args.get("--client"),
     )
     log = Path(args["--log"]) if "--log" in args else None
     server = Server(sandbox, args["--image"], Path(args["--worktree"]), log)

@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
+from agent_dispatcher.execute import tidy_patch
 from agent_dispatcher.opencode_worker import OpenCodeWorker, SandboxCall
-from agent_dispatcher.sandbox import STARTED, Sandbox
+from agent_dispatcher.sandbox import STARTED, TIDY_END, TIDY_START, Sandbox
 from agent_dispatcher.states import State
 from agent_dispatcher.telemetry import Telemetry
 from test_live import APPROVE, FakeGh, FakeModel, git, team_run
@@ -224,8 +225,35 @@ def test_an_opencode_call_gets_the_run_tool_and_is_told_to_use_it(
 
     worker.run("task", tmp_path, runner=runner, environ={})
     assert "with the sandbox run tool" in seen[0]
+    # A behaviour bug is reproduced by a failing test before the fix, but only
+    # where the worker can run it.
+    assert "test that reproduces it" in seen[0]
+    assert "that test stays as part of the change" in seen[0]
     OpenCodeWorker(SecretStr("k")).run("task", tmp_path, runner=runner, environ={})
     assert "do not attempt shell commands" in seen[1]
+    assert "reproduces" not in seen[1]
+
+
+def test_a_read_only_call_with_the_run_tool_is_not_told_to_write_tests(
+    tmp_path: Path,
+) -> None:
+    # `_instruction` picks the read-only wording before the editing wording, so
+    # a planner or reviewer with the run tool never gets the test-first step.
+    call = SandboxCall("agent-sandbox:abc", "me@box", Path("C:/k/id"), tmp_path / "l")
+    seen: list[str] = []
+
+    def runner(
+        argv: list[str], cwd: Path, stdin: str, env: object
+    ) -> tuple[int, str, str]:
+        del cwd, stdin, env
+        seen.append(argv[-1])
+        return 0, "", ""
+
+    OpenCodeWorker(SecretStr("test-only"), sandbox=call).run(
+        "task", tmp_path, read_only=True, runner=runner, environ={}
+    )
+    assert "Edit nothing" in seen[0]
+    assert "reproduces" not in seen[0]
 
 
 def test_a_run_binds_its_image_to_opencode_calls(
@@ -290,7 +318,12 @@ def test_the_reviewer_is_warned_about_weakened_checks(
     planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
     docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
     checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker).execute()
-    assert "conftest.py or tool settings" in reviewer.prompts[0][0]
+    # Compare with whitespace collapsed, so reflowing the prompt can't break it.
+    prompt = " ".join(reviewer.prompts[0][0].split())
+    assert "weakens, skips or deletes an existing test" in prompt
+    assert "changes conftest.py or tool settings" in prompt
+    # A reproducing test is the worker following its instructions, not weakening.
+    assert "A new test that reproduces" in prompt
 
 
 def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(
@@ -301,3 +334,112 @@ def test_the_run_tool_server_ignores_modules_planted_in_the_worktree(
     server = config["mcp"]["sandbox"]
     assert server["command"][1:4] == ["-P", "-m", "agent_dispatcher.sandbox_mcp"]
     assert server["environment"]["PYTHONSAFEPATH"] == "1"
+
+
+def test_the_run_tool_server_gets_the_client_and_what_windows_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("PROGRAMDATA", r"C:\ProgramData")
+    monkeypatch.setenv("GH_TOKEN", "held-secret")
+    call = SandboxCall("img", "me@box", None, None, "C:/tools/ssh.exe")
+    server = json.loads(json.dumps(call.server(tmp_path)))
+    args: list[str] = server["command"]
+    assert args[args.index("--client") + 1] == "C:/tools/ssh.exe"
+    environment: dict[str, str] = server["environment"]
+    assert environment["SYSTEMROOT"] == r"C:\Windows"
+    # Windows' ssh.exe exits 255, silently, without it (2026-11-04 benchmark).
+    assert environment["PROGRAMDATA"] == r"C:\ProgramData"
+    assert "GH_TOKEN" not in environment
+    assert environment["PYTHONSAFEPATH"] == "1"
+
+
+def test_a_run_binds_the_resolved_client(tmp_path: Path, plain_origin: Path) -> None:
+    planner, _worker, reviewer = team([], [APPROVE])
+    run = team_run(
+        tmp_path, plain_origin, (planner, FakeModel("mimo"), reviewer), FakeGh()
+    )
+    run.providers = {**run.providers, "mimo": OpenCodeWorker(SecretStr("k"))}
+    run.sandbox = Sandbox(host="me@box", client="C:/tools/ssh.exe")
+    run.sandbox_image = "img"
+    bound = run._bound_provider("mimo", "implement", tmp_path / "c")  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(bound, OpenCodeWorker)
+    assert bound.sandbox is not None
+    assert bound.sandbox.client == "C:/tools/ssh.exe"
+
+
+def tidy_output(diff: str) -> str:
+    return f"{TIDY_START}\n{diff}{TIDY_END}"
+
+
+FORMAT_DIFF = (
+    "diff --git a/app.py b/app.py\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/app.py\n"
+    "+++ b/app.py\n"
+    "@@ -1 +1 @@\n"
+    "-x=1\n"
+    "+x = 1\n"
+)
+
+
+def test_the_controller_formats_the_workers_python_before_the_checks(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    planner, worker, reviewer = team([{"app.py": "x=1\n"}], [APPROVE])
+    docker = ScriptedDocker(
+        [(0, "baseline ok"), (0, tidy_output(FORMAT_DIFF)), (0, "12 passed")]
+    )
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert docker.runs == 3
+    assert "+x = 1" in reviewer.prompts[0][0]
+    assert (tmp_path / "work/run-3-agent/app.py").read_text() == "x = 1\n"
+    assert "The controller formatted 1 file(s) with the repository's own ruff." in (
+        run.notes
+    )
+    assert gate_outcomes(tmp_path)[:2] == ["tidied", "checks_passed"]
+
+
+BODY = FORMAT_DIFF.split("\n", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "diff",
+    [
+        FORMAT_DIFF.replace("app.py", "other.py"),
+        "diff --git a/app.py b/app.py\nnew file mode 100644\n" + BODY,
+        "diff --git a/app.py b/README.md\n" + BODY,
+        "",
+    ],
+)
+def test_a_tidy_diff_beyond_the_workers_file_contents_is_refused(
+    diff: str,
+) -> None:
+    assert tidy_patch(tidy_output(diff), ["app.py"]) is None
+
+
+def test_a_tidy_diff_without_both_markers_is_ignored() -> None:
+    assert tidy_patch(FORMAT_DIFF, ["app.py"]) is None
+    assert tidy_patch(f"{TIDY_START}\n{FORMAT_DIFF}", ["app.py"]) is None
+    assert tidy_patch(tidy_output(FORMAT_DIFF), ["app.py"]) == FORMAT_DIFF
+
+
+def test_a_failed_tidy_leaves_the_workers_edits_alone(
+    tmp_path: Path, uv_origin: Path
+) -> None:
+    bad = FORMAT_DIFF.replace("-x=1", "-y=2")
+    planner, worker, reviewer = team([{"app.py": "x=1\n"}], [APPROVE])
+    docker = ScriptedDocker([(0, "baseline ok"), (0, tidy_output(bad)), (0, "ok")])
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert (tmp_path / "work/run-3-agent/app.py").read_text() == "x=1\n"
+    assert "tidied" not in gate_outcomes(tmp_path)
+
+
+def test_only_python_changes_are_tidied(tmp_path: Path, uv_origin: Path) -> None:
+    planner, worker, reviewer = team([{"docs/api.md": "# API\n"}], [APPROVE])
+    docker = ScriptedDocker([(0, "baseline ok"), (0, "ok")])
+    run = checked_run(tmp_path, uv_origin, (planner, worker, reviewer), docker)
+    assert run.execute().state is State.REVIEW
+    assert docker.runs == 2

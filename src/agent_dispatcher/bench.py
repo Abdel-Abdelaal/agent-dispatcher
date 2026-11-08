@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_dispatcher import cli
+from agent_dispatcher.awake import kept_awake
 from agent_dispatcher.dispatcher import choose_team
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.publish import GitHubWriter
@@ -167,6 +168,16 @@ def local_remote(task: BenchTask, root: Path) -> Path:
     return remote
 
 
+def tool_calls(log: Path) -> dict[str, int]:
+    """Count the run's sandbox tool calls, and those the sandbox couldn't serve."""
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    entries = [json.loads(line) for line in lines if line.strip()]
+    return {
+        "sandbox_calls": len(entries),
+        "sandbox_unavailable": sum(e.get("outcome") == "unavailable" for e in entries),
+    }
+
+
 def usage(directory: Path, run_id: int) -> dict[str, int]:
     """Sum the run's recorded tokens and model seconds from its telemetry."""
     totals = {"tokens": 0, "model_seconds": 0, "calls": 0}
@@ -257,6 +268,7 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         "resolved": published and graded.exit_code == 0,
         "wall_seconds": seconds,
         **usage(root / "telemetry", run_id),
+        **tool_calls(work / f"run-{run_id}-sandbox.jsonl"),
         "notes": list(run.notes),
     }
 
@@ -290,21 +302,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     root = arguments.root.resolve()
     results: list[dict[str, object]] = []
-    for index, task in enumerate(tasks):
-        if arguments.command == "validate":
-            result = validate(task, sandbox, root)
-        else:
-            result = attempt(
-                task,
-                settings,
-                root,
-                arguments.first_run_id + index,
-                sandbox,
-                team_sandbox=arguments.team_sandbox == "on",
-            )
-        results.append(result)
-        sys.stdout.write(json.dumps(result) + "\n")
-        sys.stdout.flush()
+    # Hours of model calls; a sleep in the middle would fail the run.
+    with kept_awake():
+        for index, task in enumerate(tasks):
+            if arguments.command == "validate":
+                result = validate(task, sandbox, root)
+            else:
+                result = attempt(
+                    task,
+                    settings,
+                    root,
+                    arguments.first_run_id + index,
+                    sandbox,
+                    team_sandbox=arguments.team_sandbox == "on",
+                )
+            results.append(result)
+            sys.stdout.write(json.dumps(result) + "\n")
+            sys.stdout.flush()
     if arguments.command == "run":
         resolved = sum(bool(result["resolved"]) for result in results)
         sys.stdout.write(

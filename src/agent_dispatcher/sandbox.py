@@ -27,7 +27,7 @@ import time
 import tomllib
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
@@ -54,6 +54,8 @@ BASE_IMAGE = (
 )
 COMMAND_FILE = ".agent-sandbox-command"
 OUTPUT_LIMIT = 12_000
+# How much of a failed ssh or docker call a local log keeps.
+DETAIL_LIMIT = 600
 # The most the controller reads back from one container call.
 CAPTURE_LIMIT = 2 * 1024**2
 # The largest copy sent in; /work is a 512 MB tmpfs.
@@ -85,6 +87,32 @@ CHECKS = (
     "else python -m unittest discover -s tests 2>&1 || status=1; fi; "
     "exit $status"
 )
+# Brackets the diff a tidy run prints, so the output's own trimming can't touch it.
+TIDY_START = "agent-tidy-diff-start"
+TIDY_END = "agent-tidy-diff-end"
+
+
+def tidy_command(files: list[str]) -> str:
+    """Format `files` and apply ruff's safe fixes, then print the diff they made.
+
+    Only with the repository's own locked ruff, and only on the named files: the
+    project's exclusions still hold, and unsafe fixes never apply whatever its
+    config says. The diff is against the snapshot of the copied worktree.
+    """
+    names = " ".join(shlex.quote(name) for name in files)
+    common = "--no-cache --force-exclude --quiet"
+    return (
+        "if [ -x /opt/venv/bin/ruff ]; then "
+        f"ruff check --fix-only --no-unsafe-fixes {common} -- {names}; "
+        f"ruff format {common} -- {names}; "
+        "fi >/dev/null 2>&1; "
+        f"echo {TIDY_START}; "
+        "git -c core.quotePath=false diff --binary --no-color --no-ext-diff "
+        "--no-textconv --unified=1; "
+        f"echo {TIDY_END}"
+    )
+
+
 # The project is found from /work, where each run unpacks it, not installed.
 _PATH_FILE = (
     '/opt/venv/bin/python -c "import site; '
@@ -150,7 +178,16 @@ _FREE = re.compile(r"^\S+\s+\d+\s+\d+\s+(\d+)\s", re.MULTILINE)
 
 
 class SandboxError(RuntimeError):
-    """The sandbox couldn't be prepared or reached; the task goes on without it."""
+    """The sandbox couldn't be prepared or reached; the task goes on without it.
+
+    `detail` keeps the end of what ssh or docker printed, for local logs only:
+    it can name hosts and key paths, so it never goes to a model.
+    """
+
+    def __init__(self, message: str, detail: str = "") -> None:
+        """Keep the message for callers and the detail for diagnosis."""
+        super().__init__(message)
+        self.detail = detail[-DETAIL_LIMIT:]
 
 
 @dataclass(frozen=True)
@@ -333,14 +370,21 @@ class Sandbox:
     ssh_key: Path | None = None
     timeout: int = 300
     execute: Exec = byte_exec
+    # The full path of ssh (remote) or docker (local), found by the controller:
+    # the run tool's server may get no PATH, and must never search its worktree.
+    client: str | None = None
+
+    def resolved(self) -> "Sandbox":
+        """Return this sandbox with its client program's full path, from PATH."""
+        return replace(self, client=program("docker" if self.host is None else "ssh"))
 
     def _docker(
         self, *args: str, stdin: bytes = b"", timeout: float = 120
     ) -> tuple[int, str]:
         """Run docker locally, or over ssh with every argument quoted for its shell."""
         if self.host is None:
-            return self.execute(["docker", *args], stdin, timeout)
-        login = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
+            return self.execute([self.client or "docker", *args], stdin, timeout)
+        login = [self.client or "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
         if self.ssh_key is not None:
             # Known hosts beside the key: the calling environment may be scrubbed.
             login += [
@@ -508,7 +552,7 @@ class Sandbox:
         before, started, after = output.partition(STARTED + "\n")
         if not started:
             message = "the sandbox could not run the command"
-            raise SandboxError(message)
+            raise SandboxError(message, f"exit {code}: {output.strip()}")
         del before
         if len(after) >= OUTPUT_LIMIT:
             after = "[earlier output cut]\n" + after
