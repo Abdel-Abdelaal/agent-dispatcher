@@ -77,6 +77,42 @@ Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.
 
+## Held-out tasks
+
+The harness has been changed nine times on the strength of the 25 tasks above,
+so their score now partly measures how well it fits them. `bench/heldout.json`
+holds 12 more real fixes that no harness change was made from. Its score is the
+honest one. Fresh tasks the system was never fitted to are the same idea as
+[SWE-bench-Live](https://github.com/microsoft/SWE-bench-Live) and
+[SWE-rebench](https://swe-rebench.com/).
+
+| Id | Repository | Size of the real fix |
+| --- | --- | --- |
+| `ad-verdict-after-braces` | agent-dispatcher | 1 file, 30 lines |
+| `ad-review-format-retry` | agent-dispatcher | 1 file, 21 lines |
+| `ad-repair-required-checks` | agent-dispatcher | 3 files, 18 lines |
+| `ad-repair-hook-lint` | agent-dispatcher | 1 file, 12 lines |
+| `ad-retry-unexplained` | agent-dispatcher | 1 file, 37 lines |
+| `ad-capped-planner-notes` | agent-dispatcher | 1 file, 50 lines |
+| `ad-failure-detail` | agent-dispatcher | 4 files, 57 lines |
+| `ad-provider-opt-out` | agent-dispatcher | 4 files, 57 lines |
+| `ad-run-summary` | agent-dispatcher | 2 files, 45 lines |
+| `ad-turns-raise-level` | agent-dispatcher | 2 files, 76 lines |
+| `ad-requirement-check` | agent-dispatcher | 1 file, 64 lines |
+| `pw-quoted-injection` | platform-workflows | 1 file, 5 lines |
+
+The statements follow the same rules as above, and every task is validated the
+same way. Two rules keep the set held out:
+
+- Run it to measure, not to tune. A miss here is a sign to look for the same
+  failure in the 25 tasks; a fix made for one held-out task makes the set one
+  task smaller, and that task moves to `bench/tasks.json`.
+- A test checks that the two files never share a task or a fix commit.
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_dispatcher.bench run --tasks bench\heldout.json --root D:\showcase\work\heldout-data --first-run-id 104000
+```
+
 ## What stays offline
 
 - **GitHub:** a fake `gh` accepts every write and does nothing. The team pushes

@@ -234,3 +234,12 @@ def test_tasks_run_with_the_system_held_awake(
     monkeypatch.setattr(bench, "attempt", attempt)
     assert bench.main(["run", "--tasks", str(path), "--root", str(tmp_path)]) == 0
     assert len(calls) == 2
+
+
+def test_the_held_out_tasks_never_overlap_the_benchmark() -> None:
+    # A held-out task the harness was tuned on would no longer be held out.
+    tuned = load_tasks(bench.TASKS)
+    held_out = load_tasks(bench.TASKS.parent / "heldout.json")
+    assert held_out
+    assert not {t.id for t in tuned} & {t.id for t in held_out}
+    assert not {t.fix for t in tuned} & {t.fix for t in held_out}
