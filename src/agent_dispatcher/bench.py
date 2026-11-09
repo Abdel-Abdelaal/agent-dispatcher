@@ -14,8 +14,10 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +39,10 @@ from agent_dispatcher.states import State
 REMOTE = "https://github.com/{repo}.git"
 CHECKOUT = Path(__file__).resolve().parents[2]
 TASKS = CHECKOUT / "bench" / "tasks.json"
+# One lock per mirror: two tasks of a repository worked on at once must not
+# fetch into the same bare clone together.
+_MIRRORS: dict[Path, threading.Lock] = {}
+_MIRRORS_LOCK = threading.Lock()
 
 
 class BenchTask(BaseModel):
@@ -91,17 +97,21 @@ def remove(path: Path) -> None:
 def checkout(task: BenchTask, root: Path, *, fixed: bool) -> Path:
     """Return a fresh checkout of the task's base commit, or of the fix itself."""
     mirror = root / "mirrors" / task.repo.replace("/", "__")
-    if not mirror.exists():
-        mirror.parent.mkdir(parents=True, exist_ok=True)
-        git(root, "clone", "-q", "--bare", REMOTE.format(repo=task.repo), str(mirror))
-    else:
-        git(
-            mirror,
-            "fetch",
-            "-q",
-            REMOTE.format(repo=task.repo),
-            "+refs/heads/*:refs/heads/*",
-        )
+    with _MIRRORS_LOCK:
+        lock = _MIRRORS.setdefault(mirror, threading.Lock())
+    with lock:
+        if not mirror.exists():
+            mirror.parent.mkdir(parents=True, exist_ok=True)
+            remote = REMOTE.format(repo=task.repo)
+            git(root, "clone", "-q", "--bare", remote, str(mirror))
+        else:
+            git(
+                mirror,
+                "fetch",
+                "-q",
+                REMOTE.format(repo=task.repo),
+                "+refs/heads/*:refs/heads/*",
+            )
     commit = task.fix if fixed else f"{task.fix}^"
     target = root / "checkouts" / f"{task.id}-{'fix' if fixed else 'base'}"
     remove(target)
@@ -230,6 +240,9 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         return {"id": task.id, "outcome": "no team", "resolved": False}
     work = root / "work"
     work.mkdir(parents=True, exist_ok=True)
+    # Each run has its own telemetry folder, so runs side by side never append
+    # to the same file.
+    telemetry = root / "telemetry" / f"run-{run_id}"
     with httpx.Client() as client:
         run = cli.make_run(
             settings, issue, run_id=run_id, team=team, client=client, root=work
@@ -237,7 +250,7 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         run.remote = str(remote)
         run.writer = GitHubWriter(offline_gh, {}, work)
         run.authorize = lambda _issue, _expected: True
-        run.telemetry = replace(cli.telemetry(settings), directory=root / "telemetry")
+        run.telemetry = replace(cli.telemetry(settings), directory=telemetry)
         if not team_sandbox:
             run.sandbox = None
         started = time.monotonic()
@@ -265,10 +278,65 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         "hidden_tests_pass": graded.exit_code == 0,
         "resolved": published and graded.exit_code == 0,
         "wall_seconds": seconds,
-        **usage(root / "telemetry", run_id),
+        **usage(telemetry, run_id),
         **tool_calls(work / f"run-{run_id}-sandbox.jsonl"),
         "notes": list(run.notes),
     }
+
+
+def side_by_side(
+    work: Callable[[int, BenchTask], dict[str, object]],
+    tasks: list[BenchTask],
+    parallel: int,
+) -> list[dict[str, object]]:
+    """Run `work` on up to `parallel` tasks at once, printing each result as it ends.
+
+    A task that raises stops the run: tasks not started yet never start, and
+    its error is raised once the tasks already running have finished.
+    """
+    stopped = threading.Event()
+
+    def one(index: int, task: BenchTask) -> dict[str, object] | None:
+        if stopped.is_set():
+            return None
+        try:
+            return work(index, task)
+        except BaseException:
+            stopped.set()
+            raise
+
+    results: list[dict[str, object]] = []
+    failure: Exception | None = None
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        futures: list[Future[dict[str, object] | None]] = [
+            pool.submit(one, index, task) for index, task in enumerate(tasks)
+        ]
+        try:
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as error:  # noqa: BLE001 - raised below
+                    failure = failure or error
+                    continue
+                if result is not None:
+                    results.append(result)
+                    sys.stdout.write(json.dumps(result) + "\n")
+                    sys.stdout.flush()
+        except BaseException:
+            stopped.set()
+            raise
+    if failure is not None:
+        raise failure
+    return results
+
+
+def at_least_one(value: str) -> int:
+    """Parse --parallel: a whole number of tasks at once, at least one."""
+    number = int(value)
+    if number < 1:
+        message = "must be at least 1"
+        raise argparse.ArgumentTypeError(message)
+    return number
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -285,6 +353,12 @@ def main(argv: list[str] | None = None) -> int:
         default="on",
         help="off measures the team without the run tool and checks",
     )
+    parser.add_argument(
+        "--parallel",
+        type=at_least_one,
+        default=1,
+        help="how many tasks to work on at once; each prints when it finishes",
+    )
     arguments = parser.parse_args(argv)
     settings = load_settings(CHECKOUT / ".env")
     tasks = [
@@ -299,24 +373,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     root = arguments.root.resolve()
-    results: list[dict[str, object]] = []
-    # Hours of model calls; a sleep in the middle would fail the run.
+
+    def one(index: int, task: BenchTask) -> dict[str, object]:
+        if arguments.command == "validate":
+            return validate(task, sandbox, root)
+        # The run id follows the task's place in the file, whatever order the
+        # tasks finish in.
+        return attempt(
+            task,
+            settings,
+            root,
+            arguments.first_run_id + index,
+            sandbox,
+            team_sandbox=arguments.team_sandbox == "on",
+        )
+
+    # Hours of model calls; a sleep in the middle would fail the run. The hold
+    # is on this thread, which waits until every task is done.
     with kept_awake():
-        for index, task in enumerate(tasks):
-            if arguments.command == "validate":
-                result = validate(task, sandbox, root)
-            else:
-                result = attempt(
-                    task,
-                    settings,
-                    root,
-                    arguments.first_run_id + index,
-                    sandbox,
-                    team_sandbox=arguments.team_sandbox == "on",
-                )
-            results.append(result)
-            sys.stdout.write(json.dumps(result) + "\n")
-            sys.stdout.flush()
+        results = side_by_side(one, tasks, arguments.parallel)
     if arguments.command == "run":
         resolved = sum(bool(result["resolved"]) for result in results)
         sys.stdout.write(
