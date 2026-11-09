@@ -77,6 +77,25 @@ Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.
 
+### Can "done" be trusted?
+
+A published change is the team saying "done". So besides `resolved`, the
+summary measures how far that claim can be trusted:
+
+- `published`: how many changes the team published.
+- `wrong_done`: published changes whose hidden tests fail. The team said done,
+  and it wasn't.
+- `correct_unpublished`: changes the team didn't publish whose hidden tests pass.
+  The work was right, but it was lost.
+- `done_precision`: the share of published changes that were right.
+
+Before this was measured, every run from 2026-11-01 to 2026-11-09 together
+(192 results) had published 168 changes, 14 of them wrong (precision 0.92).
+Eight of the 14 were the same task, `pw-scan-context-secrets`. The team's own
+tests replaced the scanner with a fake, so they passed on a change that hid the
+secret from the real scanner, and the reviewer approved it. The aim is a
+`wrong_done` of 0: when the team says done, it should be right.
+
 ### Several tasks at once
 
 `--parallel 2` works on two tasks at a time. Each result prints when its task
