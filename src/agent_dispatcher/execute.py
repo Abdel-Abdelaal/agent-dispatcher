@@ -403,6 +403,31 @@ def _unexplained_failure(result: RunResult) -> bool:
     )
 
 
+# What OpenCode's OpenAI-compatible stream parser (from the AI SDK) says when the
+# provider streams a new tool call without an id or name. Benchmarks 8 and 9 saw
+# it on 6 of 191 OpenCode calls, all of them planning or review, and twice in a
+# row on one review, which lost a run whose code passed the hidden tests. The
+# upstream fix (anomalyco/opencode#12585) was closed unmerged.
+_STREAM_FAULTS = (
+    "Expected 'id' to be a string.",
+    "Expected 'function.name' to be a string.",
+)
+# How many more times a call that hit a stream fault is tried. Other failures
+# without a reason get one more try.
+STREAM_FAULT_RETRIES = 3
+
+
+def _stream_fault(result: RunResult) -> bool:
+    """Say whether a call failed because the provider's reply stream was malformed.
+
+    The detail is untrusted, so the most it can buy is a few more tries, each
+    within the run's time limit.
+    """
+    return _unexplained_failure(result) and any(
+        fault in result.detail for fault in _STREAM_FAULTS
+    )
+
+
 def _plan_verdict(text: str) -> str:
     """Name a plan reply's outcome for telemetry."""
     _, plan = split_rating(text)
@@ -833,7 +858,8 @@ class Run:
         """Run one model call, record it, and stop the run if it failed or ran out.
 
         A call that failed without a reason (no limit, quota or lost evidence) is
-        tried once more first.
+        tried once more first, or up to `STREAM_FAULT_RETRIES` more times when
+        the provider's reply stream was malformed.
 
         One exception: a coding call (implement or repair, never a CI repair) that
         hit its time limit after making new edits returns normally, and the run is
@@ -855,7 +881,7 @@ class Run:
             "format. These restrictions also apply to copies in templates.\n"
         ) + repo_rules(clone)
         before = self.workspace.patch(clone) if kind in _CODING else ""
-        retried = False
+        retries = 0
         while True:
             tuning = self._tuning(name) if read_only else None
             thinking, working = TURNS[self.level.label]
@@ -875,7 +901,9 @@ class Run:
                 )
             finally:
                 CALL_TIMEOUT.reset(limit)
-            if _unexplained_failure(result) and not retried:
+            fault = _stream_fault(result)
+            allowed = STREAM_FAULT_RETRIES if fault else 1
+            if _unexplained_failure(result) and retries < allowed:
                 # Usually a provider or transport error. The clone keeps any
                 # edits, so a coding call picks up where it was.
                 self._record_call(
@@ -888,10 +916,13 @@ class Run:
                     outcome="failed",
                     context=context,
                 )
-                retried = True
+                retries += 1
                 self.notes.append(
-                    f"{name} failed while {stage} without saying why, so the "
-                    "call was tried once more."
+                    f"{name}'s reply stream was malformed while {stage} (a tool "
+                    "call without an id or name), so the call was tried again."
+                    if fault
+                    else f"{name} failed while {stage} without saying why, so "
+                    "the call was tried once more."
                 )
                 continue
             if (
