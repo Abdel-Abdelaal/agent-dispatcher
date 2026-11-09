@@ -60,6 +60,7 @@ No upstream source code is copied into this repository.
 | State the diff caps in every coding prompt; one shrink call | #92 | not checked | n/a | our own | no |
 | Retry a call that fails with no reason, once | #93 | common retry practice | n/a | our own | no |
 | Retry a call up to three more times when the provider streams a tool call without an id | #109 | [anomalyco/opencode#6290](https://github.com/anomalyco/opencode/issues/6290) and the closed, unmerged fix [#12585](https://github.com/anomalyco/opencode/pull/12585) (generate a fallback id); the OpenAI and AI SDK clients' bounded retries of transient errors | MIT | the diagnosis, and bounded retries; the fallback id is a patch to OpenCode's bundled AI SDK, which we pin and do not patch | yes |
+| Work on several benchmark tasks at once (`--parallel`) | #117 | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent)'s `--workers` and the [SWE-bench harness](https://github.com/SWE-bench/SWE-bench)'s `--max_workers`: a thread pool over instances, results collected as they complete | MIT | a thread pool with `as_completed` and a default of one at a time, as in mini-swe-agent; mini-swe-agent locks its shared predictions file, and here only the main thread prints; our own: a lock per mirror, a telemetry folder per run, and no new task starting after one raises | yes |
 
 ## Checked and not taken
 

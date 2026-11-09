@@ -3,6 +3,9 @@
 import json
 import os
 import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -243,3 +246,180 @@ def test_the_held_out_tasks_never_overlap_the_benchmark() -> None:
     assert held_out
     assert not {t.id for t in tuned} & {t.id for t in held_out}
     assert not {t.fix for t in tuned} & {t.fix for t in held_out}
+
+
+def task_file(tmp_path: Path, count: int) -> Path:
+    path = tmp_path / "tasks.json"
+    tasks = [
+        task(str(n) * 40).model_copy(update={"id": f"r-{n}"}).model_dump()
+        for n in range(count)
+    ]
+    path.write_text(json.dumps(tasks), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() with an empty .env, a sandbox that never runs, and no awake call."""
+    monkeypatch.setattr(bench, "CHECKOUT", tmp_path)
+
+    def sandbox(_settings: object) -> Sandbox:
+        return Sandbox()
+
+    monkeypatch.setattr(bench.cli, "sandbox", sandbox)
+    monkeypatch.setattr(awake, "windows_setter", lambda: None)
+
+
+def printed(capsys: pytest.CaptureFixture[str]) -> list[dict[str, object]]:
+    return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+
+@pytest.mark.usefixtures("offline")
+def test_parallel_works_on_tasks_side_by_side(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Each attempt waits for the other, so this only passes if both run at once.
+    both = threading.Barrier(2, timeout=10)
+
+    def attempt(
+        task: BenchTask,
+        _settings: object,
+        _root: Path,
+        run_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        both.wait()
+        return {"id": task.id, "run_id": run_id, "resolved": task.id == "r-0"}
+
+    monkeypatch.setattr(bench, "attempt", attempt)
+    path = task_file(tmp_path, 2)
+    argv = ["run", "--tasks", str(path), "--root", str(tmp_path), "--parallel", "2"]
+    assert bench.main(argv) == 0
+    *results, summary = printed(capsys)
+    assert {(r["id"], r["run_id"]) for r in results} == {
+        ("r-0", 90_000),
+        ("r-1", 90_001),
+    }
+    assert summary == {"resolved": 1, "tasks": 2}
+
+
+@pytest.mark.usefixtures("offline")
+def test_tasks_run_one_at_a_time_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lock = threading.Lock()
+    running: list[int] = [0]
+    most: list[int] = [0]
+
+    def attempt(
+        task: BenchTask,
+        _settings: object,
+        _root: Path,
+        run_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+        time.sleep(0.05)
+        with lock:
+            running[0] -= 1
+        return {"id": task.id, "run_id": run_id, "resolved": True}
+
+    monkeypatch.setattr(bench, "attempt", attempt)
+    path = task_file(tmp_path, 3)
+    assert bench.main(["run", "--tasks", str(path), "--root", str(tmp_path)]) == 0
+    *results, summary = printed(capsys)
+    assert [(r["id"], r["run_id"]) for r in results] == [
+        ("r-0", 90_000),
+        ("r-1", 90_001),
+        ("r-2", 90_002),
+    ]
+    assert most == [1]
+    assert summary == {"resolved": 3, "tasks": 3}
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_task_that_raises_stops_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[str] = []
+
+    def attempt(
+        task: BenchTask, *_args: object, **_kwargs: object
+    ) -> dict[str, object]:
+        started.append(task.id)
+        message = "the controller broke"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(bench, "attempt", attempt)
+    path = task_file(tmp_path, 3)
+    with pytest.raises(RuntimeError, match="the controller broke"):
+        bench.main(["run", "--tasks", str(path), "--root", str(tmp_path)])
+    assert started == ["r-0"]
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_task_that_raises_lets_running_tasks_finish_and_starts_no_more(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    both = threading.Barrier(2, timeout=10)
+    started: list[str] = []
+
+    def attempt(
+        task: BenchTask,
+        _settings: object,
+        _root: Path,
+        run_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        started.append(task.id)
+        if task.id == "r-0":
+            both.wait()
+            message = "the controller broke"
+            raise RuntimeError(message)
+        both.wait()
+        time.sleep(0.1)
+        return {"id": task.id, "run_id": run_id, "resolved": True}
+
+    monkeypatch.setattr(bench, "attempt", attempt)
+    path = task_file(tmp_path, 3)
+    argv = ["run", "--tasks", str(path), "--root", str(tmp_path), "--parallel", "2"]
+    with pytest.raises(RuntimeError, match="the controller broke"):
+        bench.main(argv)
+    assert sorted(started) == ["r-0", "r-1"]
+    assert printed(capsys) == [{"id": "r-1", "run_id": 90_001, "resolved": True}]
+
+
+@pytest.mark.usefixtures("offline")
+def test_parallel_must_be_at_least_one(tmp_path: Path) -> None:
+    path = task_file(tmp_path, 1)
+    with pytest.raises(SystemExit):
+        bench.main(
+            ["run", "--tasks", str(path), "--root", str(tmp_path), "--parallel", "0"]
+        )
+
+
+def test_two_tasks_of_one_repository_can_check_out_at_once(
+    tmp_path: Path, upstream: tuple[Path, str]
+) -> None:
+    _, fix = upstream
+    tasks = [task(fix).model_copy(update={"id": f"r-{n}"}) for n in range(4)]
+    root = tmp_path / "bench"
+
+    def base(one: BenchTask) -> Path:
+        return checkout(one, root, fixed=False)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        trees = list(pool.map(base, tasks))
+    for tree in trees:
+        assert (tree / "calc.py").read_text(encoding="utf-8").endswith("a - b\n")

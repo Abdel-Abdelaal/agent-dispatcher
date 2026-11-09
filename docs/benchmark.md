@@ -77,6 +77,29 @@ Each task prints one JSON line: the team, outcome, whether a change was
 published, whether the hidden tests pass, `resolved` (both), wall seconds,
 tokens, model seconds and calls. A summary line follows.
 
+### Several tasks at once
+
+`--parallel 2` works on two tasks at a time. Each result prints when its task
+finishes, so lines can come out of file order. Run ids still follow the file
+order. The default is 1, one task at a time.
+
+About 90% of a task's time is spent waiting for the model, so tasks side by side
+barely slow each other down. On 2026-11-09 two held-out tasks run together
+finished in 20 minutes, against 39 one after the other, with the same results.
+
+The limits are memory, not CPU:
+
+- The PC (8 GB) runs one OpenCode worker per task, at about 0.5 GB each.
+- The sandbox VPS (2 CPUs, 3.8 GB) also serves live services, and each sandbox
+  container may take 1 CPU and 1 GB.
+
+During that test the PC never had less than 447 MB free, and the VPS never had
+less than 1.4 GB available, with no new swap. Keep it at 2 until there is more
+memory on both.
+
+If a task raises, no new task starts, the tasks already running finish and
+print, and then the error stops the run.
+
 ## Held-out tasks
 
 The harness has been changed nine times on the strength of the 25 tasks above,
@@ -118,8 +141,9 @@ same way. Two rules keep the set held out:
 - **GitHub:** a fake `gh` accepts every write and does nothing. The team pushes
   to a local bare repository whose `main` is the commit before the fix; the
   fix itself is never in it.
-- **Telemetry** goes to `<root>/telemetry`, not the controller's, so benchmark
-  runs never reach the dashboard.
+- **Telemetry** goes to `<root>/telemetry/run-<id>`, not the controller's, so
+  benchmark runs never reach the dashboard, and runs side by side never write to
+  the same file.
 - **Run ids** start at 90000, apart from real runs.
 
 ## Cost
