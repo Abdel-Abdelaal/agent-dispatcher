@@ -20,6 +20,7 @@ from agent_dispatcher.dispatcher import Plan
 from agent_dispatcher.execute import (
     NO_FINDINGS,
     NO_PLAN,
+    STREAM_FAULT_RETRIES,
     Outcome,
     Provider,
     Run,
@@ -902,6 +903,80 @@ def test_a_call_that_failed_without_a_reason_is_tried_once_more(
     assert reviews[0]["error_excerpt"] == "upstream returned 502"
     assert reviews[0]["error_excerpt_status"] == "clean"
     assert "error_excerpt" not in reviews[1]
+
+
+STREAM_FAULT = (
+    '{"type": "error", "error": {"name": "UnknownError", '
+    '"data": {"message": "Expected \'id\' to be a string."}}}'
+)
+API_DOC: dict[str, str | None] = {"docs/api.md": "# API\n"}
+
+
+class StreamFaultModel(FakeModel):
+    """Fails its first calls the way OpenCode does on a tool call without an id."""
+
+    def __init__(
+        self, name: str, replies: list[str], faults: int, detail: str = STREAM_FAULT
+    ) -> None:
+        super().__init__(name, replies)
+        self.faults = faults
+        self.detail = detail
+
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        *,
+        read_only: bool = False,
+        tuning: Tuning | None = None,
+        max_turns: int | None = None,
+    ) -> RunResult:
+        if self.faults:
+            self.faults -= 1
+            self.prompts.append((prompt, read_only))
+            return RunResult(self.name, 1, "", exhausted=False, detail=self.detail)
+        return super().run(
+            prompt, worktree, read_only=read_only, tuning=tuning, max_turns=max_turns
+        )
+
+
+def test_a_malformed_reply_stream_is_tried_again_up_to_three_times(
+    tmp_path: Path, origin: Path
+) -> None:
+    # Benchmark 9 lost a run whose code passed the hidden tests to two of these
+    # in a row while reviewing.
+    planner, worker, _ = models([API_DOC], [])
+    reviewer = StreamFaultModel("codex", [APPROVE], faults=STREAM_FAULT_RETRIES)
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome == Outcome(State.REVIEW, "https://github.com/o/r/pull/9")
+    assert len(reviewer.prompts) == STREAM_FAULT_RETRIES + 1
+    notes = [note for note in run.notes if "reply stream was malformed" in note]
+    assert len(notes) == STREAM_FAULT_RETRIES
+
+
+def test_a_reply_stream_that_stays_malformed_still_fails_the_run(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, _ = models([API_DOC], [])
+    reviewer = StreamFaultModel("codex", [APPROVE], faults=STREAM_FAULT_RETRIES + 1)
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome == Outcome(State.FAILED, "codex failed while reviewing.")
+    assert len(reviewer.prompts) == STREAM_FAULT_RETRIES + 1
+
+
+def test_other_failures_without_a_reason_are_still_tried_only_once(
+    tmp_path: Path, origin: Path
+) -> None:
+    planner, worker, _ = models([API_DOC], [])
+    reviewer = StreamFaultModel(
+        "codex", [APPROVE], faults=2, detail="upstream returned 502"
+    )
+    run = team_run(tmp_path, origin, (planner, worker, reviewer), FakeGh())
+    outcome = run.execute()
+    assert outcome == Outcome(State.FAILED, "codex failed while reviewing.")
+    assert len(reviewer.prompts) == 2
 
 
 @pytest.mark.parametrize("stop_reason", ["", "timed_out"])
