@@ -393,11 +393,31 @@ def main(argv: list[str] | None = None) -> int:
     with kept_awake():
         results = side_by_side(one, tasks, arguments.parallel)
     if arguments.command == "run":
-        resolved = sum(bool(result["resolved"]) for result in results)
-        sys.stdout.write(
-            json.dumps({"resolved": resolved, "tasks": len(results)}) + "\n"
-        )
+        sys.stdout.write(json.dumps(summary(results)) + "\n")
     return 0
+
+
+def summary(results: list[dict[str, object]]) -> dict[str, object]:
+    """Count what was solved, and how far the team's own "done" can be trusted.
+
+    A published change is the team saying "done". `wrong_done` counts those whose
+    hidden tests fail; `correct_unpublished` counts correct work the team didn't
+    publish. `done_precision` is the share of published changes that were right.
+    """
+    resolved = sum(bool(result["resolved"]) for result in results)
+    published = sum(bool(result.get("published")) for result in results)
+    return {
+        "resolved": resolved,
+        "tasks": len(results),
+        "published": published,
+        "wrong_done": sum(
+            bool(r.get("published")) and not r.get("hidden_tests_pass") for r in results
+        ),
+        "correct_unpublished": sum(
+            not r.get("published") and bool(r.get("hidden_tests_pass")) for r in results
+        ),
+        "done_precision": round(resolved / published, 3) if published else None,
+    }
 
 
 if __name__ == "__main__":

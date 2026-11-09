@@ -303,7 +303,8 @@ def test_parallel_works_on_tasks_side_by_side(
         ("r-0", 90_000),
         ("r-1", 90_001),
     }
-    assert summary == {"resolved": 1, "tasks": 2}
+    assert summary["resolved"] == 1
+    assert summary["tasks"] == 2
 
 
 @pytest.mark.usefixtures("offline")
@@ -342,7 +343,8 @@ def test_tasks_run_one_at_a_time_by_default(
         ("r-2", 90_002),
     ]
     assert most == [1]
-    assert summary == {"resolved": 3, "tasks": 3}
+    assert summary["resolved"] == 3
+    assert summary["tasks"] == 3
 
 
 @pytest.mark.usefixtures("offline")
@@ -423,3 +425,34 @@ def test_two_tasks_of_one_repository_can_check_out_at_once(
         trees = list(pool.map(base, tasks))
     for tree in trees:
         assert (tree / "calc.py").read_text(encoding="utf-8").endswith("a - b\n")
+
+
+def test_the_summary_says_how_far_done_can_be_trusted() -> None:
+    def result(*, published: bool, passes: bool) -> dict[str, object]:
+        return {
+            "published": published,
+            "hidden_tests_pass": passes,
+            "resolved": published and passes,
+        }
+
+    results = [
+        result(published=True, passes=True),
+        result(published=True, passes=True),
+        result(published=True, passes=True),
+        result(published=True, passes=False),
+        result(published=False, passes=True),
+        result(published=False, passes=False),
+    ]
+    assert bench.summary(results) == {
+        "resolved": 3,
+        "tasks": 6,
+        "published": 4,
+        "wrong_done": 1,
+        "correct_unpublished": 1,
+        "done_precision": 0.75,
+    }
+
+
+def test_nothing_published_has_no_precision() -> None:
+    no_team: dict[str, object] = {"id": "r-1", "outcome": "no team", "resolved": False}
+    assert bench.summary([no_team])["done_precision"] is None
