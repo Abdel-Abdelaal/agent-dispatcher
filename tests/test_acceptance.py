@@ -228,6 +228,11 @@ def test_a_capped_writer_keeps_its_tests_and_never_raises_the_level(
     assert run.level is Level.MEDIUM
     assert run.acceptance == {NAME: TEST}
     assert len(worker.prompts) == 2
+    assert (
+        "mimo stopped at its 20-step cap while writing acceptance tests; the "
+        "controller checks any test files it wrote."
+    ) in run.notes
+    assert not any("went on without it" in note for note in run.notes)
 
 
 def test_acceptance_tests_are_off_unless_asked_for(

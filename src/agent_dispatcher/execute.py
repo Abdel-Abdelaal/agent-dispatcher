@@ -1108,6 +1108,21 @@ class Run:
                 if read_only and result.stop_reason == "max_turns"
                 else _STOP_REASONS.get(result.stop_reason, "")
             )
+            if fallback is not None and kind == ACCEPTANCE_KIND:
+                # Its test files may already be on disk: say so, rather than
+                # that the run went on without it.
+                cap = (
+                    f"its {ACCEPTANCE_STEPS}-step cap"
+                    if result.stop_reason == "max_turns"
+                    else "its time limit"
+                    if result.stop_reason == "timed_out"
+                    else "a failure"
+                )
+                self.notes.append(
+                    f"{name} stopped at {cap} while {stage}; the controller "
+                    "checks any test files it wrote."
+                )
+                return fallback
             if fallback is not None and not result.retention_errors:
                 self.notes.append(
                     f"{name} gave no reply while {stage}{why}, so the run went on "

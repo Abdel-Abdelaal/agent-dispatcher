@@ -143,8 +143,9 @@ class Settings(BaseSettings):
     hard_candidates: int = Field(default=2, ge=1, le=3)
     # Before the change is made, the worker writes tests from the issue alone in
     # a separate clone; those that fail on the unchanged code then check the
-    # change. Needs the sandbox. Costs about one short coding call more.
-    acceptance_tests: bool = True
+    # change. Needs the sandbox. Off by default: benchmark 10 measured 29% more
+    # tokens and no wrong change caught (docs/acceptance-tests.md).
+    acceptance_tests: bool = False
     # Thinking (plan, review) follows the task's level: see levels.DEFAULT_LADDER.
     # Override with JSON, e.g. {"claude": {"hard": ["claude-opus-5-5", "max"]}}.
     thinking_ladder: dict[str, dict[str, tuple[str, str]]] = Field(

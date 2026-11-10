@@ -52,13 +52,32 @@ never sees it.
 - **Python only.** It needs a locked Python project in the sandbox, like the
   repository checks.
 
-## Cost and switch
+## Measured: off by default
 
-About one short coding call per task, plus a few seconds of sandbox per check.
-`DISPATCHER_ACCEPTANCE_TESTS=false` turns it off.
+Benchmark 10 ran all 25 tasks with acceptance tests on, on 2026-11-10 (ids
+105000 to 105017 and 105100 to 105106). All 25 were resolved and none was
+wrongly done. Benchmark 9, without them, resolved 23. But the acceptance tests
+can't take the credit:
 
-The benchmark's `wrong_done` and `done_precision` ([benchmark](benchmark.md))
-measure whether it works.
+- **Cost.** 6.67M tokens against 4.45M for benchmark 9 (+50%). The
+  acceptance call alone used 1.94M (29%) and about 4.4 hours of model time.
+  The writer stopped at its step or time cap on 14 of the 24 tasks whose notes
+  were kept.
+- **What was kept.** Of those 24 tasks, the tests were kept on 16. On 6 they
+  passed before the change, and on 2 no test file was written.
+- **What they flagged.** They failed on the change 3 times
+  (`sh-head-metadata`, `ad-actions-job-links`, `ad-fence-scrub`). All 3
+  changes passed their hidden tests, so all 3 flags were wrong tests. Each one
+  cost a worker round and a reviewer warning for nothing.
+- **What they caught.** Nothing. The task that was most often wrongly done
+  before, `pw-scan-context-secrets`, got no acceptance tests (no test file was
+  written), so its first pass came from elsewhere. The other gain,
+  `pw-bounded-retries`, came from the retry for malformed streams.
+
+So the feature stays, but `DISPATCHER_ACCEPTANCE_TESTS` defaults to `false`.
+Turn it on to measure it again, for example with a stronger worker. The
+benchmark's `wrong_done` and `done_precision` ([benchmark](benchmark.md)) show
+whether it helps.
 
 ## Sources
 
