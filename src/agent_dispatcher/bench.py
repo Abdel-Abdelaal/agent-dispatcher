@@ -32,7 +32,7 @@ from agent_dispatcher.dispatcher import choose_team
 from agent_dispatcher.execute import TOKEN_KINDS
 from agent_dispatcher.intake import Issue
 from agent_dispatcher.publish import GitHubWriter
-from agent_dispatcher.sandbox import Sandbox, SandboxResult
+from agent_dispatcher.sandbox import Sandbox, SandboxError, SandboxResult
 from agent_dispatcher.settings import Settings, load_settings
 from agent_dispatcher.states import State
 
@@ -139,6 +139,39 @@ def run_tests(
     """Run the hidden tests over `tree` in the sandbox."""
     names = " ".join(task.tests)
     return sandbox.run(image, tree, f"pytest -q -p no:cacheprovider {names}")
+
+
+GRADE_TRIES = 3
+GRADE_WAIT_SECONDS = 30
+
+
+def grade(
+    sandbox: Sandbox,
+    image: str,
+    tree: Path,
+    task: BenchTask,
+    *,
+    wait: float = GRADE_WAIT_SECONDS,
+) -> SandboxResult | None:
+    """Run the hidden tests, trying again when the sandbox itself faults.
+
+    A fault (ssh or docker failing before the tests start) says nothing about
+    the change, so it is tried again after `wait` seconds. After GRADE_TRIES
+    faults the task is left ungraded (None) rather than stopping the benchmark.
+    The fault's detail goes to stderr only: it can name hosts and key paths.
+    """
+    for number in range(1, GRADE_TRIES + 1):
+        try:
+            return run_tests(sandbox, image, tree, task)
+        except SandboxError as error:
+            sys.stderr.write(
+                f"{task.id}: grading fault {number} of {GRADE_TRIES}: {error} "
+                f"({error.detail[-300:]})\n"
+            )
+            sys.stderr.flush()
+            if number < GRADE_TRIES:
+                time.sleep(wait)
+    return None
 
 
 def validate(task: BenchTask, sandbox: Sandbox, root: Path) -> dict[str, object]:
@@ -267,7 +300,8 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
     fix = checkout(task, root, fixed=True)
     hidden_tests(task, fix, tree)
     image = run.sandbox_image or grader.prepare(checkout(task, root, fixed=False))
-    graded = run_tests(grader, image, tree, task)
+    graded = grade(grader, image, tree, task)
+    passed = None if graded is None else graded.exit_code == 0
     return {
         "id": task.id,
         "run_id": run_id,
@@ -275,8 +309,8 @@ def attempt(  # noqa: PLR0913 - the grader and the comparison switch ride along
         "team_sandbox": team_sandbox,
         "outcome": outcome.state.value,
         "published": published,
-        "hidden_tests_pass": graded.exit_code == 0,
-        "resolved": published and graded.exit_code == 0,
+        "hidden_tests_pass": passed,
+        "resolved": published and passed is True,
         "wall_seconds": seconds,
         **usage(telemetry, run_id),
         **tool_calls(work / f"run-{run_id}-sandbox.jsonl"),
@@ -402,21 +436,30 @@ def summary(results: list[dict[str, object]]) -> dict[str, object]:
 
     A published change is the team saying "done". `wrong_done` counts those whose
     hidden tests fail; `correct_unpublished` counts correct work the team didn't
-    publish. `done_precision` is the share of published changes that were right.
+    publish. `done_precision` is the share of graded published changes that were
+    right. `ungraded` counts tasks never graded (no team, or the sandbox faulted
+    on every try): they are neither right nor wrong.
     """
+    graded = [r for r in results if r.get("hidden_tests_pass") is not None]
     resolved = sum(bool(result["resolved"]) for result in results)
     published = sum(bool(result.get("published")) for result in results)
+    published_graded = sum(bool(r.get("published")) for r in graded)
     return {
         "resolved": resolved,
         "tasks": len(results),
         "published": published,
         "wrong_done": sum(
-            bool(r.get("published")) and not r.get("hidden_tests_pass") for r in results
+            bool(r.get("published")) and r.get("hidden_tests_pass") is False
+            for r in results
         ),
         "correct_unpublished": sum(
-            not r.get("published") and bool(r.get("hidden_tests_pass")) for r in results
+            not r.get("published") and r.get("hidden_tests_pass") is True
+            for r in results
         ),
-        "done_precision": round(resolved / published, 3) if published else None,
+        "ungraded": len(results) - len(graded),
+        "done_precision": (
+            round(resolved / published_graded, 3) if published_graded else None
+        ),
     }
 
 
