@@ -95,7 +95,7 @@ providers of their role. See [extra providers](docs/extra-providers.md).
 | NVIDIA (implement) through OpenCode | built; harness live-tested on MiMo's OpenAI API, needs a key |
 | Extra providers (any OpenAI-compatible API) through OpenCode | built, tested with fakes |
 | [Sandbox](docs/sandbox.md): models run tests in locked-down containers; checks before review | built, tested with fakes and by hand on the VPS |
-| [Acceptance tests](docs/acceptance-tests.md): tests written from the issue alone, before the change, check it | built, tested with fakes |
+| [Acceptance tests](docs/acceptance-tests.md): tests written from the issue alone, before the change, check it | built, measured; off by default |
 | GitHub App for PRs | waits for the VPS move; the laptop uses the owner's `gh` login |
 
 ### Keeping token use down
@@ -116,10 +116,10 @@ providers of their role. See [extra providers](docs/extra-providers.md).
   both, and the controller keeps the one its checks and the other's tests favour
   ([how](docs/sandbox.md#how-it-works)). It costs about one more hard coding call per
   hard task; set it to 1 to turn it off.
-- Spending more to trust "done": `DISPATCHER_ACCEPTANCE_TESTS=true` (the default)
-  has the worker write tests from the issue alone before the change, and checks the
-  change with them ([how](docs/acceptance-tests.md)). It costs about one short
-  coding call per task; set it to false to turn it off.
+- Acceptance tests: `DISPATCHER_ACCEPTANCE_TESTS=true` has the worker write tests
+  from the issue alone before the change, and checks the change with them
+  ([how](docs/acceptance-tests.md)). It is off by default: on the benchmark it
+  cost 29% more tokens and caught no wrong change.
 
 ### Which repositories
 
