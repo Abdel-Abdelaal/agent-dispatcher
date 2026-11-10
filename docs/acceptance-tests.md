@@ -13,34 +13,33 @@ never sees it.
 
 ## How it works
 
-1. **Written from the issue alone.** After the plan, the worker writes one or two
-   pytest files named `test_acceptance_<topic>.py` in a fresh clone of the
-   unchanged repository. It sees only the issue, not the plan, and runs its tests
-   with the sandbox run tool.
-   - The call is capped at 20 steps and 15 minutes.
-   - Running out of steps never raises the task's level.
-   - A failed call leaves the run as it was; a spent quota still parks it.
-2. **Kept only if they fail before the change.** The controller runs the new test
-   files on the unchanged code in the sandbox. It drops them all when:
-   - they pass there, so they test nothing new;
-   - they don't run;
-   - they fail only on a syntax error of their own.
-
-   This is SWT-bench's fail-to-pass rule.
-3. **Run on each candidate.** After a candidate's checks, the controller runs the
-   kept files on the change in the sandbox. The files go into the sandbox's copy
-   only, never into the change. If they fail, the worker gets one round to meet
-   them, shown the tests and their output and told the tests may be wrong. The
-   round is skipped when the run's time is short.
-4. **Shown to the reviewer.** Every review gets the latest result: the tests may
-   be wrong, a failure is a reason to check that requirement, and passing tests
-   don't replace its own check.
-5. **Used to choose.** On a hard task with more than one candidate, a candidate
-   that passes the acceptance tests ranks above one that fails them, just after
-   the repository's checks.
-6. **Reported in the PR.** The run table says how many files were written from the
-   issue alone, that they failed on the unchanged code, and whether they pass on
-   the change. The wording is the controller's own: no model text.
+- **Written from the issue alone.** After the plan, the worker writes one or two
+  pytest files named `test_acceptance_<topic>.py` in a fresh clone of the
+  unchanged repository. It sees only the issue, not the plan, and runs its tests
+  with the sandbox run tool.
+  - The call is capped at 20 steps and 15 minutes.
+  - Running out of steps never raises the task's level.
+  - A failed call leaves the run as it was; a spent quota still parks it.
+- **Kept only if they fail before the change.** The controller runs the new test
+  files on the unchanged code in the sandbox, by SWT-bench's fail-to-pass rule.
+  It drops them all when:
+  - they pass there, so they test nothing new;
+  - they don't run;
+  - they fail only on a syntax error of their own.
+- **Run on each candidate.** After a candidate's checks, the controller runs the
+  kept files on the change in the sandbox. The files go into the sandbox's copy
+  only, never into the change. If they fail, the worker gets one round to meet
+  them, shown the tests and their output and told the tests may be wrong. The
+  round is skipped when the run's time is short.
+- **Shown to the reviewer.** Every review gets the latest result: the tests may
+  be wrong, a failure is a reason to check that requirement, and passing tests
+  don't replace its own check.
+- **Used to choose.** On a hard task with more than one candidate, a candidate
+  that passes the acceptance tests ranks above one that fails them, just after
+  the repository's checks.
+- **Reported in the PR.** The run table says how many files were written from the
+  issue alone, that they failed on the unchanged code, and whether they pass on
+  the change. The wording is the controller's own: no model text.
 
 ## What it isn't
 
