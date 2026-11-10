@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -22,7 +23,7 @@ from agent_dispatcher.bench import (
     usage,
     validate,
 )
-from agent_dispatcher.sandbox import STARTED, Sandbox
+from agent_dispatcher.sandbox import STARTED, Sandbox, SandboxError, SandboxResult
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -449,6 +450,7 @@ def test_the_summary_says_how_far_done_can_be_trusted() -> None:
         "published": 4,
         "wrong_done": 1,
         "correct_unpublished": 1,
+        "ungraded": 0,
         "done_precision": 0.75,
     }
 
@@ -456,3 +458,70 @@ def test_the_summary_says_how_far_done_can_be_trusted() -> None:
 def test_nothing_published_has_no_precision() -> None:
     no_team: dict[str, object] = {"id": "r-1", "outcome": "no team", "resolved": False}
     assert bench.summary([no_team])["done_precision"] is None
+
+
+def test_an_ungraded_task_is_neither_right_nor_wrong() -> None:
+    right: dict[str, object] = {
+        "published": True,
+        "hidden_tests_pass": True,
+        "resolved": True,
+    }
+    ungraded: dict[str, object] = {
+        "published": True,
+        "hidden_tests_pass": None,
+        "resolved": False,
+    }
+    summary = bench.summary([right, ungraded])
+    assert summary["wrong_done"] == 0
+    assert summary["ungraded"] == 1
+    assert summary["done_precision"] == 1.0
+
+
+class FaultySandbox:
+    """Faults `faults` times before the command starts, then runs it."""
+
+    def __init__(self, faults: int) -> None:
+        self.faults = faults
+        self.calls = 0
+
+    def run(self, _image: str, _tree: Path, _command: str) -> SandboxResult:
+        self.calls += 1
+        if self.calls <= self.faults:
+            message = "the sandbox could not run the command"
+            raise SandboxError(message, "exit 255: ssh: connection reset")
+        return SandboxResult(0, "1 passed")
+
+
+def grading_task() -> bench.BenchTask:
+    return bench.BenchTask.model_validate(
+        {
+            "id": "t-1",
+            "repo": "o/r",
+            "fix": "b" * 40,
+            "title": "t",
+            "problem": "p",
+            "tests": ["tests/test_x.py"],
+        }
+    )
+
+
+def test_a_sandbox_fault_while_grading_is_tried_again(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sandbox = FaultySandbox(faults=2)
+    result = bench.grade(
+        cast("Sandbox", sandbox), "image", Path(), grading_task(), wait=0
+    )
+    assert result is not None
+    assert result.exit_code == 0
+    assert sandbox.calls == bench.GRADE_TRIES
+    assert "grading fault 2 of 3" in capsys.readouterr().err
+
+
+def test_grading_that_always_faults_leaves_the_task_ungraded() -> None:
+    sandbox = FaultySandbox(faults=bench.GRADE_TRIES)
+    result = bench.grade(
+        cast("Sandbox", sandbox), "image", Path(), grading_task(), wait=0
+    )
+    assert result is None
+    assert sandbox.calls == bench.GRADE_TRIES

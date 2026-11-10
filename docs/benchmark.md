@@ -87,7 +87,12 @@ summary measures how far that claim can be trusted:
   and it wasn't.
 - `correct_unpublished`: changes the team didn't publish whose hidden tests pass.
   The work was right, but it was lost.
-- `done_precision`: the share of published changes that were right.
+- `done_precision`: the share of graded published changes that were right.
+- `ungraded`: tasks that were never graded. Grading tries the sandbox three
+  times, 30 seconds apart, when ssh or docker fails before the hidden tests
+  start. If all three fail, the task is left ungraded and the benchmark goes
+  on. An ungraded task counts as neither right nor wrong. The fault's detail
+  goes to stderr only, because it can name hosts and key paths.
 
 Before this was measured, every run from 2026-11-01 to 2026-11-09 together
 (192 results) had published 168 changes, 14 of them wrong (precision 0.92).
