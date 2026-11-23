@@ -11,7 +11,7 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: 38bfb07c0c64c304f47eb52090f8288150c77730 # v0.17.1
+    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5 # v0.17.4
     hooks:
       - id: ruff-check
         args: [--fix]
