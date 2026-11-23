@@ -17,7 +17,7 @@ jobs:
       security-events: write
       id-token: write
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,14 +33,14 @@ jobs:
           name: scorecard-results
           path: results.sarif
           retention-days: 7
-      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: results.sarif
           category: scorecard
   report:
     needs: scorecard
     if: failure() && github.event_name == 'schedule'
-    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/report-failure.yml@aa42de723a82473499d8744c37ed4e571c868354 # v1.12.0
+    uses: Abdel-Abdelaal/platform-workflows/.github/workflows/report-failure.yml@2b86e583c1c8556eaf08816f39f52bbb724d5b65 # v1.12.1
     permissions:
       issues: write
     with:
